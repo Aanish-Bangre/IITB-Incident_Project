@@ -28,5 +28,11 @@ class Plate(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(String, nullable=False)
-    plate_image_path = Column(String, nullable=True)
-    confidence = Column(Float, nullable=True)
+
+    plate_text = Column(String, nullable=False)
+    best_confidence = Column(Float, nullable=True)
+
+    best_image_path = Column(String, nullable=True)
+
+
+

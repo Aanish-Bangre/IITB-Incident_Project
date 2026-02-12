@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
-from app.db.models import Job
+from app.db.models import Job, Plate
 from app.db.database import SessionLocal
 import os
 import shutil
@@ -54,4 +54,46 @@ def upload_video(
     return {
         "job_id": new_job.job_id,
         "status": new_job.status
+    }
+
+@router.get("/job/{job_id}")
+def get_job_status(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+
+    if not job:
+        return {"error": "Job not found"}
+
+    return {
+        "job_id": job.job_id,
+        "status": job.status
+    }
+
+@router.get("/job/{job_id}/results")
+def get_job_results(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+
+    if not job:
+        return {"error": "Job not found"}
+
+    if job.status != "completed":
+        return {
+            "job_id": job_id,
+            "status": job.status,
+            "message": "Job not completed yet"
+        }
+
+    plates = db.query(Plate).filter(Plate.job_id == job_id).all()
+
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "total_plates": len(plates),
+        "plates": [
+            {
+                "plate_text": plate.plate_text,
+                "confidence": plate.best_confidence,
+                "image_path": plate.best_image_path
+            }
+            for plate in plates
+        ]
     }
