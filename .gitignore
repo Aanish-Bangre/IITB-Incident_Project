@@ -33,15 +33,17 @@ ENV/
 # ===============================
 # Media / Uploaded Files
 # ===============================
-media/
-uploads/
-outputs/
-debug/
+media/videos/
+media/outputs/
+media/processed/
+media/debug/
+
 # ===============================
-# ML Models
+# ML Models (keep trained models in repo or use Git LFS)
 # ===============================
-models/*.pt
-models/*.pth
+# Uncomment below to ignore models if they're too large
+# models/*.pt
+# models/*.pth
 *.onnx
 *.engine
 

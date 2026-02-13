@@ -15,15 +15,6 @@ class Job(Base):
     status = Column(String, default="pending")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-# class Vehicle(Base):
-#     __tablename__ = "vehicles"
-
-#     id = Column(Integer, primary_key=True, index=True)
-#     job_id = Column(String, nullable=False)
-#     vehicle_type = Column(String, nullable=True)
-#     vehicle_image_path = Column(String, nullable=True)
-#     confidence = Column(Float, nullable=True)
-
 class Plate(Base):
     __tablename__ = "plates"
 
@@ -35,6 +26,9 @@ class Plate(Base):
     bbox_confidence = Column(Float, nullable=True)
 
     best_image_path = Column(String, nullable=True)
+    vehicle_type = Column(String, nullable=True)
+    vehicle_confidence = Column(Float, nullable=True)
+    vehicle_image_path = Column(String, nullable=True)
 
 
 

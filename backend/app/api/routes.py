@@ -94,7 +94,10 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
                 "plate_text": plate.plate_text,
                 "confidence": plate.best_confidence,
                 "bbox_confidence": plate.bbox_confidence,
-                "image_path": plate.best_image_path
+                "image_path": plate.best_image_path,
+                "vehicle_type": plate.vehicle_type,
+                "vehicle_confidence": plate.vehicle_confidence,
+                "vehicle_image_path": plate.vehicle_image_path
             }
             for plate in plates
         ]

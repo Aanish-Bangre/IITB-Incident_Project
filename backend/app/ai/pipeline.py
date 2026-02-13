@@ -10,7 +10,7 @@ from app.ai.plate_detector import detect_plates
 from app.ai.preprocessing import preprocess_plate_for_ocr
 from app.ai.ocr import run_easyocr
 from app.db.models import Plate, Job
-
+from app.ai.vehicle_detector import detect_vehicles
 
 OUTPUT_DIR = "media/outputs"
 PROCESSED_DIR = "media/processed"
@@ -21,6 +21,13 @@ os.makedirs(PROCESSED_DIR, exist_ok=True)
 os.makedirs(DEBUG_DIR, exist_ok=True)
 
 MIN_OCR_CONF = 0.6
+
+
+def is_inside(inner, outer):
+    """Check if inner bbox is inside outer bbox (for plate-vehicle matching)"""
+    ix1, iy1, ix2, iy2 = inner
+    ox1, oy1, ox2, oy2 = outer
+    return ix1 >= ox1 and iy1 >= oy1 and ix2 <= ox2 and iy2 <= oy2
 
 
 def run_pipeline(job_id: str, video_path: str, db):
@@ -55,11 +62,40 @@ def run_pipeline(job_id: str, video_path: str, db):
         
         frame_count += 1
 
+        vehicle_detections = detect_vehicles(frame)
+        
+        # Draw vehicle bounding boxes (blue)
+        for v in vehicle_detections:
+            vx1, vy1, vx2, vy2 = v["bbox"]
+            cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (255, 0, 0), 2)
+            cv2.putText(
+                frame,
+                v["label"],
+                (vx1, max(vy1 - 10, 0)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.9,
+                (255, 0, 0),
+                2
+            )
+        
         detections = detect_plates(frame)
 
         for det in detections:
             x1, y1, x2, y2 = det["bbox"]
             det_conf = det.get("confidence", 0.0)
+            
+            # Match plate to vehicle
+            vehicle_type = None
+            vehicle_conf = None
+            vehicle_crop = None
+            for v in vehicle_detections:
+                if is_inside([x1, y1, x2, y2], v["bbox"]):
+                    vehicle_type = v["label"]
+                    vehicle_conf = v["confidence"]
+                    # Crop vehicle bbox from original frame
+                    vx1, vy1, vx2, vy2 = v["bbox"]
+                    vehicle_crop = frame[vy1:vy2, vx1:vx2].copy()
+                    break
 
             # Always draw detection box (like the test script)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
@@ -96,7 +132,10 @@ def run_pipeline(job_id: str, video_path: str, db):
                             grouped[text].append({
                                 "confidence": conf,
                                 "bbox_confidence": det_conf,
-                                "image": raw_crop
+                                "image": raw_crop,
+                                "vehicle_type": vehicle_type,
+                                "vehicle_conf": vehicle_conf,
+                                "vehicle_crop": vehicle_crop
                             })
 
             # Draw text overlay (OCR result or "Plate")
@@ -177,12 +216,22 @@ def run_pipeline(job_id: str, video_path: str, db):
 
         output_path = f"{OUTPUT_DIR}/{job_id}_{safe_text}.jpg"
         cv2.imwrite(output_path, best_entry["image"])
+        
+        # Save vehicle crop image if available
+        vehicle_image_path = None
+        if best_entry.get("vehicle_crop") is not None:
+            vehicle_output_path = f"{OUTPUT_DIR}/{job_id}_{safe_text}_vehicle.jpg"
+            cv2.imwrite(vehicle_output_path, best_entry["vehicle_crop"])
+            vehicle_image_path = vehicle_output_path.replace("media/", "", 1)
 
         final_plate = Plate(
             job_id=job_id,
             plate_text=plate_text,
             best_confidence=best_entry["confidence"],
             bbox_confidence=best_entry.get("bbox_confidence", 0.0),
+            vehicle_type=best_entry.get("vehicle_type"),
+            vehicle_confidence=best_entry.get("vehicle_conf"),
+            vehicle_image_path=vehicle_image_path,
             # Store path relative to media directory
             best_image_path=output_path.replace("media/", "", 1)
         )

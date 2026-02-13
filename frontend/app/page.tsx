@@ -47,6 +47,9 @@ interface Plate {
   confidence: number;
   bbox_confidence: number;
   image_path: string;
+  vehicle_type?: string;
+  vehicle_confidence?: number;
+  vehicle_image_path?: string;
 }
 
 type JobStatus = "idle" | "uploading" | "pending" | "processing" | "completed" | "failed";
@@ -374,15 +377,29 @@ export default function Home() {
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead>Vehicle Crop</TableHead>
                           <TableHead>Plate Crop</TableHead>
                           <TableHead>Plate Text</TableHead>
+                          <TableHead>Vehicle Type</TableHead>
                           <TableHead className="text-right">BBox Confidence</TableHead>
                           <TableHead className="text-right">OCR Confidence</TableHead>
+                          <TableHead className="text-right">Vehicle Confidence</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {plates.map((plate, index) => (
                           <TableRow key={`${plate.plate_text}-${index}`}>
+                            <TableCell>
+                              {plate.vehicle_image_path ? (
+                                <img
+                                  src={`http://localhost:8000/media/${plate.vehicle_image_path}`}
+                                  alt={`Vehicle ${plate.vehicle_type}`}
+                                  className="h-20 rounded-md border"
+                                />
+                              ) : (
+                                <span className="text-muted-foreground text-sm">N/A</span>
+                              )}
+                            </TableCell>
                             <TableCell>
                               <img
                                 src={`http://localhost:8000/media/${plate.image_path}`}
@@ -393,9 +410,21 @@ export default function Home() {
                             <TableCell>
                               <Badge variant="outline">{plate.plate_text}</Badge>
                             </TableCell>
+                            <TableCell>
+                              {plate.vehicle_type ? (
+                                <Badge variant="secondary">{plate.vehicle_type}</Badge>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">N/A</span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-right font-medium">                            {(plate.bbox_confidence * 100).toFixed(2)}%
                           </TableCell>
                           <TableCell className="text-right font-medium">                              {(plate.confidence * 100).toFixed(2)}%
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {plate.vehicle_confidence
+                                ? `${(plate.vehicle_confidence * 100).toFixed(2)}%`
+                                : 'N/A'}
                             </TableCell>
                           </TableRow>
                         ))}
