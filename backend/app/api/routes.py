@@ -23,6 +23,7 @@ def get_db():
     finally:
         db.close()
 
+
 @router.post("/upload-video")
 def upload_video(
     background_tasks: BackgroundTasks,
@@ -33,11 +34,9 @@ def upload_video(
     video_filename = f"{job_id}.mp4"
     video_path = os.path.join(MEDIA_DIR, video_filename)
 
-    # Save video
     with open(video_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Create DB job
     new_job = Job(
         job_id=job_id,
         video_path=video_path,
@@ -48,13 +47,13 @@ def upload_video(
     db.commit()
     db.refresh(new_job)
 
-    # Start background processing
     background_tasks.add_task(process_job, job_id, db)
 
     return {
         "job_id": new_job.job_id,
         "status": new_job.status
     }
+
 
 @router.get("/job/{job_id}")
 def get_job_status(job_id: str, db: Session = Depends(get_db)):
@@ -67,6 +66,7 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)):
         "job_id": job.job_id,
         "status": job.status
     }
+
 
 @router.get("/job/{job_id}/results")
 def get_job_results(job_id: str, db: Session = Depends(get_db)):
@@ -87,11 +87,13 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
     return {
         "job_id": job_id,
         "status": job.status,
+        "processed_video": job.processed_video_path,
         "total_plates": len(plates),
         "plates": [
             {
                 "plate_text": plate.plate_text,
                 "confidence": plate.best_confidence,
+                "bbox_confidence": plate.bbox_confidence,
                 "image_path": plate.best_image_path
             }
             for plate in plates
