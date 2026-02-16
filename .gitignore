@@ -33,11 +33,11 @@ ENV/
 # ===============================
 # Media / Uploaded Files
 # ===============================
-backend/media/videos/
-backend/media/frames/
-backend/media/outputs/
-backend/media/processed/
-backend/media/debug/
+backend/media/videos/*
+backend/media/frames/*
+backend/media/outputs/*
+backend/media/processed/*
+backend/media/debug/*
 
 # ===============================
 # ML Models (keep trained models in repo or use Git LFS)
