@@ -34,6 +34,7 @@ ENV/
 # Media / Uploaded Files
 # ===============================
 backend/media/videos/
+backend/media/frames/
 backend/media/outputs/
 backend/media/processed/
 backend/media/debug/
