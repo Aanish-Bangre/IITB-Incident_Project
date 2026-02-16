@@ -1,8 +1,9 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { Camera, LayoutDashboard, Moon, Sun } from "lucide-react";
-import API from "@/lib/api";
+import { Camera, LayoutDashboard, Moon, Sun, History } from "lucide-react";
+import API, { uploadVideo, getFirstFrame, setROILine, getJobStatus, getJobResults } from "@/lib/api";
+import ROILineSelector from "@/components/ROILineSelector";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,11 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 
+interface Point {
+  x: number;
+  y: number;
+}
+
 interface Plate {
   plate_text: string;
   confidence: number;
@@ -50,13 +56,16 @@ interface Plate {
   vehicle_type?: string;
   vehicle_confidence?: number;
   vehicle_image_path?: string;
+  track_id?: number;
+  frame_number?: number;
 }
 
-type JobStatus = "idle" | "uploading" | "pending" | "processing" | "completed" | "failed";
+type JobStatus = "idle" | "uploading" | "uploaded" | "pending" | "processing" | "completed" | "failed";
 
 const STATUS_PROGRESS: Record<JobStatus, number> = {
   idle: 0,
   uploading: 18,
+  uploaded: 30,
   pending: 34,
   processing: 70,
   completed: 100,
@@ -74,6 +83,10 @@ export default function Home() {
   const [message, setMessage] = useState("Upload a video to begin ANPR processing.");
   const [progress, setProgress] = useState(0);
   const [isFetchingResults, setIsFetchingResults] = useState(false);
+  
+  // ROI/Line selection
+  const [showROISelector, setShowROISelector] = useState(false);
+  const [firstFrameUrl, setFirstFrameUrl] = useState<string | null>(null);
 
   const statusBadgeVariant = useMemo(() => {
     if (status === "completed") return "default" as const;
@@ -147,9 +160,6 @@ export default function Home() {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
-
     try {
       setStatus("uploading");
       setProgress(STATUS_PROGRESS.uploading);
@@ -157,17 +167,77 @@ export default function Home() {
       setPlates([]);
       setProcessedVideoPath(null);
 
-      const response = await API.post("/upload-video", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const response = await uploadVideo(file);
+      const newJobId = response.data.job_id;
 
-      setJobId(response.data.job_id);
-      setStatus("pending");
-      setMessage("Upload complete. Job queued for processing.");
+      setJobId(newJobId);
+      setStatus("uploaded");
+      setMessage("Upload complete. Setting up ROI and counting line...");
+
+      // Get first frame for ROI selection
+      try {
+        const frameResponse = await getFirstFrame(newJobId);
+        const frameBlob = new Blob([frameResponse.data]);
+        const frameUrl = URL.createObjectURL(frameBlob);
+
+        setFirstFrameUrl(frameUrl);
+        setShowROISelector(true);
+        setMessage("Please select ROI and counting line...");
+      } catch (err) {
+        console.error("Failed to load frame:", err);
+        // Fallback: skip ROI selection
+        setStatus("pending");
+        setMessage("Starting processing without ROI selection...");
+        await setROILine(newJobId, null, null);
+      }
     } catch (error) {
       console.error("Upload failed:", error);
       setStatus("failed");
       setMessage("Upload failed. Verify backend connection and retry.");
+    }
+  };
+
+  const handleROILineComplete = async (
+    roi: Array<{ x: number; y: number }>,
+    line: Array<{ x: number; y: number }>
+  ) => {
+    if (!jobId) return;
+
+    try {
+      setShowROISelector(false);
+      setMessage("Starting processing with tracking...");
+      setStatus("pending");
+
+      // Convert points to backend format
+      const roiCoords = roi.map(p => [Math.round(p.x), Math.round(p.y)]);
+      const lineCoords = [
+        Math.round(line[0].x),
+        Math.round(line[0].y),
+        Math.round(line[1].x),
+        Math.round(line[1].y)
+      ];
+
+      await setROILine(jobId, roiCoords, lineCoords);
+    } catch (error) {
+      console.error("Failed to set ROI/Line:", error);
+      setStatus("failed");
+      setMessage("Failed to start processing.");
+    }
+  };
+
+  const handleSkipROILine = async () => {
+    if (!jobId) return;
+
+    try {
+      setShowROISelector(false);
+      setMessage("Starting processing without ROI/Line filtering...");
+      setStatus("pending");
+
+      await setROILine(jobId, null, null);
+    } catch (error) {
+      console.error("Failed to start processing:", error);
+      setStatus("failed");
+      setMessage("Failed to start processing.");
     }
   };
 
@@ -179,11 +249,11 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId || status === "uploaded" || showROISelector) return;
 
     const interval = setInterval(async () => {
       try {
-        const response = await API.get(`/job/${jobId}`);
+        const response = await getJobStatus(jobId);
         const jobStatus = response.data.status as JobStatus;
 
         setStatus(jobStatus);
@@ -193,7 +263,7 @@ export default function Home() {
         }
 
         if (jobStatus === "processing") {
-          setMessage("ANPR pipeline is running on sampled video frames.");
+          setMessage("Tracking vehicles and detecting plates...");
         }
 
         if (jobStatus === "completed") {
@@ -213,7 +283,7 @@ export default function Home() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [jobId]);
+  }, [jobId, status, showROISelector]);
 
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
@@ -225,8 +295,8 @@ export default function Home() {
         <SidebarHeader className="p-2">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton tooltip="ANPR" asChild isActive>
-                <a href="#">
+              <SidebarMenuButton tooltip="ANPR" asChild>
+                <a href="/">
                   <Camera />
                   <span>ANPR</span>
                 </a>
@@ -242,9 +312,17 @@ export default function Home() {
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton tooltip="Dashboard" asChild isActive>
-                    <a href="#">
+                    <a href="/">
                       <LayoutDashboard />
                       <span>Dashboard</span>
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Results" asChild>
+                    <a href="/results">
+                      <History />
+                      <span>Results</span>
                     </a>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -282,10 +360,22 @@ export default function Home() {
             </CardHeader>
 
             <CardContent className="space-y-6">
+              {/* ROI/Line Selector */}
+              {showROISelector && firstFrameUrl && jobId && (
+                <ROILineSelector
+                  jobId={jobId}
+                  imageUrl={firstFrameUrl}
+                  onComplete={handleROILineComplete}
+                  onSkip={handleSkipROILine}
+                />
+              )}
+
+              {/* Upload Form - Hide when showing ROI selector */}
+              {!showROISelector && (
               <Card>
                 <CardHeader>
                   <CardTitle>Upload & Monitor</CardTitle>
-                  <CardDescription>Supports video files compatible with your backend pipeline.</CardDescription>
+                  <CardDescription>Upload traffic video for vehicle tracking and ANPR.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -324,27 +414,32 @@ export default function Home() {
                   </Alert>
                 </CardContent>
               </Card>
+              )}
 
-              <Separator />
+              {!showROISelector && (<Separator />)}
 
-              {processedVideoPath ? (
+              {processedVideoPath && !showROISelector ? (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Processed Video</CardTitle>
-                    <CardDescription>Annotated output generated by the ANPR pipeline.</CardDescription>
+                    <CardTitle>Processed Video with Tracking</CardTitle>
+                    <CardDescription>Annotated video showing tracked vehicles, ROI, and counting line.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <video
-                      src={`http://localhost:8000/media/${processedVideoPath}`}
+                      src={`http://localhost:8000/${processedVideoPath}`}
                       controls
                       className="w-full rounded-lg border"
-                    />
+                      preload="metadata"
+                    >
+                      Your browser does not support the video tag.
+                    </video>
                   </CardContent>
                 </Card>
               ) : null}
 
-              <Separator />
+              {!showROISelector && (<Separator />)}
 
+              {!showROISelector && (
               <Card id="results-section">
                 <CardHeader>
                   <CardTitle>Detected Plates</CardTitle>
@@ -381,6 +476,7 @@ export default function Home() {
                           <TableHead>Plate Crop</TableHead>
                           <TableHead>Plate Text</TableHead>
                           <TableHead>Vehicle Type</TableHead>
+                          <TableHead>Track ID</TableHead>
                           <TableHead className="text-right">BBox Confidence</TableHead>
                           <TableHead className="text-right">OCR Confidence</TableHead>
                           <TableHead className="text-right">Vehicle Confidence</TableHead>
@@ -392,7 +488,7 @@ export default function Home() {
                             <TableCell>
                               {plate.vehicle_image_path ? (
                                 <img
-                                  src={`http://localhost:8000/media/${plate.vehicle_image_path}`}
+                                  src={`http://localhost:8000/${plate.vehicle_image_path}`}
                                   alt={`Vehicle ${plate.vehicle_type}`}
                                   className="h-20 rounded-md border"
                                 />
@@ -402,7 +498,7 @@ export default function Home() {
                             </TableCell>
                             <TableCell>
                               <img
-                                src={`http://localhost:8000/media/${plate.image_path}`}
+                                src={`http://localhost:8000/${plate.image_path}`}
                                 alt={`Detected plate ${plate.plate_text}`}
                                 className="h-16 rounded-md border"
                               />
@@ -415,6 +511,13 @@ export default function Home() {
                                 <Badge variant="secondary">{plate.vehicle_type}</Badge>
                               ) : (
                                 <span className="text-muted-foreground text-sm">N/A</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {plate.track_id !== undefined ? (
+                                <Badge variant="outline">#{plate.track_id}</Badge>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">-</span>
                               )}
                             </TableCell>
                             <TableCell className="text-right font-medium">                            {(plate.bbox_confidence * 100).toFixed(2)}%
@@ -433,6 +536,7 @@ export default function Home() {
                   ) : null}
                 </CardContent>
               </Card>
+              )}
             </CardContent>
           </Card>
         </main>

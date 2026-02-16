@@ -13,6 +13,8 @@ class Job(Base):
     video_path = Column(String, nullable=False)
     processed_video_path = Column(String, nullable=True)
     status = Column(String, default="pending")
+    roi_coords = Column(String, nullable=True)  # JSON string of polygon points
+    line_coords = Column(String, nullable=True)  # JSON string of line points
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Plate(Base):
@@ -29,6 +31,11 @@ class Plate(Base):
     vehicle_type = Column(String, nullable=True)
     vehicle_confidence = Column(Float, nullable=True)
     vehicle_image_path = Column(String, nullable=True)
+    
+    # Tracking information
+    track_id = Column(Integer, nullable=True)  # Vehicle tracking ID
+    frame_number = Column(Integer, nullable=True)  # Frame when detected
+    crossed_line = Column(Integer, default=1)  # 1 if crossed line (filtered)
 
 
 

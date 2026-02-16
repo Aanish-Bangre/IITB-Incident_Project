@@ -33,10 +33,10 @@ ENV/
 # ===============================
 # Media / Uploaded Files
 # ===============================
-media/videos/
-media/outputs/
-media/processed/
-media/debug/
+backend/media/videos/
+backend/media/outputs/
+backend/media/processed/
+backend/media/debug/
 
 # ===============================
 # ML Models (keep trained models in repo or use Git LFS)
@@ -51,6 +51,8 @@ media/debug/
 # Logs
 # ===============================
 *.log
+
+Newest/
 
 # ===============================
 # Docker

@@ -7,3 +7,5 @@ pydantic
 opencv-python
 ultralytics
 easyocr
+scipy
+supervision
