@@ -83,7 +83,7 @@ export default function Home() {
   const [message, setMessage] = useState("Upload a video to begin ANPR processing.");
   const [progress, setProgress] = useState(0);
   const [isFetchingResults, setIsFetchingResults] = useState(false);
-  
+
   // ROI/Line selection
   const [showROISelector, setShowROISelector] = useState(false);
   const [firstFrameUrl, setFirstFrameUrl] = useState<string | null>(null);
@@ -97,18 +97,10 @@ export default function Home() {
   const statusLabel = useMemo(() => status.charAt(0).toUpperCase() + status.slice(1), [status]);
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("theme");
-    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-    const nextTheme: "light" | "dark" =
-      storedTheme === "dark" || storedTheme === "light"
-        ? storedTheme
-        : systemPrefersDark
-          ? "dark"
-          : "light";
-
-    document.documentElement.classList.toggle("dark", nextTheme === "dark");
-    setTheme(nextTheme);
+    const stored = localStorage.getItem("theme") as "light" | "dark" | null;
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const resolved = stored === "dark" || stored === "light" ? stored : (prefersDark ? "dark" : "light");
+    setTheme(resolved); // Only sync React state — layout script already set the DOM class
   }, []);
 
   useEffect(() => {
@@ -380,48 +372,48 @@ export default function Home() {
 
               {/* Upload Form - Hide when showing ROI selector */}
               {!showROISelector && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Upload & Monitor</CardTitle>
-                  <CardDescription>Upload traffic video for vehicle tracking and ANPR.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="video-upload">Video file</Label>
-                    <Input id="video-upload" type="file" accept="video/*" onChange={handleFileChange} />
-                  </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Upload & Monitor</CardTitle>
+                    <CardDescription>Upload traffic video for vehicle tracking and ANPR.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="video-upload">Video file</Label>
+                      <Input id="video-upload" type="file" accept="video/*" onChange={handleFileChange} />
+                    </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      onClick={handleUpload}
-                      disabled={!file || status === "uploading" || status === "processing" || status === "pending"}
-                    >
-                      {status === "uploading" ? "Uploading..." : "Start Detection"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setFile(null);
-                        setJobId(null);
-                        setPlates([]);
-                        setProcessedVideoPath(null);
-                        setStatus("idle");
-                        setProgress(0);
-                        setMessage("Reset complete. Upload a new video.");
-                      }}
-                    >
-                      Reset
-                    </Button>
-                  </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        onClick={handleUpload}
+                        disabled={!file || status === "uploading" || status === "processing" || status === "pending"}
+                      >
+                        {status === "uploading" ? "Uploading..." : "Start Detection"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setFile(null);
+                          setJobId(null);
+                          setPlates([]);
+                          setProcessedVideoPath(null);
+                          setStatus("idle");
+                          setProgress(0);
+                          setMessage("Reset complete. Upload a new video.");
+                        }}
+                      >
+                        Reset
+                      </Button>
+                    </div>
 
-                  <Progress value={progress} />
+                    <Progress value={progress} />
 
-                  <Alert variant={status === "failed" ? "destructive" : "default"}>
-                    <AlertTitle>Pipeline status</AlertTitle>
-                    <AlertDescription>{message}</AlertDescription>
-                  </Alert>
-                </CardContent>
-              </Card>
+                    <Alert variant={status === "failed" ? "destructive" : "default"}>
+                      <AlertTitle>Pipeline status</AlertTitle>
+                      <AlertDescription>{message}</AlertDescription>
+                    </Alert>
+                  </CardContent>
+                </Card>
               )}
 
               {!showROISelector && (<Separator />)}
@@ -448,102 +440,102 @@ export default function Home() {
               {!showROISelector && (<Separator />)}
 
               {!showROISelector && (
-              <Card id="results-section">
-                <CardHeader>
-                  <CardTitle>Detected Plates</CardTitle>
-                  <CardDescription>
-                    Best-confidence image and OCR text grouped by plate string.
-                  </CardDescription>
-                  <CardAction>
-                    <Badge variant="secondary">{plates.length} result(s)</Badge>
-                  </CardAction>
-                </CardHeader>
-                <CardContent>
-                  {isFetchingResults ? (
-                    <div className="space-y-3">
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                      <Skeleton className="h-10 w-full" />
-                    </div>
-                  ) : null}
+                <Card id="results-section">
+                  <CardHeader>
+                    <CardTitle>Detected Plates</CardTitle>
+                    <CardDescription>
+                      Best-confidence image and OCR text grouped by plate string.
+                    </CardDescription>
+                    <CardAction>
+                      <Badge variant="secondary">{plates.length} result(s)</Badge>
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent>
+                    {isFetchingResults ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                      </div>
+                    ) : null}
 
-                  {!isFetchingResults && status === "completed" && plates.length === 0 ? (
-                    <Alert>
-                      <AlertTitle>No plates found</AlertTitle>
-                      <AlertDescription>
-                        Processing finished but no valid plates were detected with current thresholds.
-                      </AlertDescription>
-                    </Alert>
-                  ) : null}
+                    {!isFetchingResults && status === "completed" && plates.length === 0 ? (
+                      <Alert>
+                        <AlertTitle>No plates found</AlertTitle>
+                        <AlertDescription>
+                          Processing finished but no valid plates were detected with current thresholds.
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
 
-                  {!isFetchingResults && plates.length > 0 ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Vehicle Crop</TableHead>
-                          <TableHead>Plate Crop</TableHead>
-                          <TableHead>Plate Text</TableHead>
-                          <TableHead>Vehicle Type</TableHead>
-                          <TableHead>Track ID</TableHead>
-                          <TableHead className="text-right">BBox Confidence</TableHead>
-                          <TableHead className="text-right">OCR Confidence</TableHead>
-                          <TableHead className="text-right">Vehicle Confidence</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {plates.map((plate, index) => (
-                          <TableRow key={`${plate.plate_text}-${index}`}>
-                            <TableCell>
-                              {plate.vehicle_image_path ? (
-                                <img
-                                  src={`http://localhost:8000/${plate.vehicle_image_path}`}
-                                  alt={`Vehicle ${plate.vehicle_type}`}
-                                  className="h-20 rounded-md border"
-                                />
-                              ) : (
-                                <span className="text-muted-foreground text-sm">N/A</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <img
-                                src={`http://localhost:8000/${plate.image_path}`}
-                                alt={`Detected plate ${plate.plate_text}`}
-                                className="h-16 rounded-md border"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{plate.plate_text}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              {plate.vehicle_type ? (
-                                <Badge variant="secondary">{plate.vehicle_type}</Badge>
-                              ) : (
-                                <span className="text-muted-foreground text-sm">N/A</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {plate.track_id !== undefined ? (
-                                <Badge variant="outline">#{plate.track_id}</Badge>
-                              ) : (
-                                <span className="text-muted-foreground text-sm">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right font-medium">                            {(plate.bbox_confidence * 100).toFixed(2)}%
-                          </TableCell>
-                          <TableCell className="text-right font-medium">                              {(plate.confidence * 100).toFixed(2)}%
-                            </TableCell>
-                            <TableCell className="text-right font-medium">
-                              {plate.vehicle_confidence
-                                ? `${(plate.vehicle_confidence * 100).toFixed(2)}%`
-                                : 'N/A'}
-                            </TableCell>
+                    {!isFetchingResults && plates.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Vehicle Crop</TableHead>
+                            <TableHead>Plate Crop</TableHead>
+                            <TableHead>Plate Text</TableHead>
+                            <TableHead>Vehicle Type</TableHead>
+                            <TableHead>Track ID</TableHead>
+                            <TableHead className="text-right">BBox Confidence</TableHead>
+                            <TableHead className="text-right">OCR Confidence</TableHead>
+                            <TableHead className="text-right">Vehicle Confidence</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  ) : null}
-                </CardContent>
-              </Card>
+                        </TableHeader>
+                        <TableBody>
+                          {plates.map((plate, index) => (
+                            <TableRow key={`${plate.plate_text}-${index}`}>
+                              <TableCell>
+                                {plate.vehicle_image_path ? (
+                                  <img
+                                    src={`http://localhost:8000/${plate.vehicle_image_path}`}
+                                    alt={`Vehicle ${plate.vehicle_type}`}
+                                    className="h-20 rounded-md border"
+                                  />
+                                ) : (
+                                  <span className="text-muted-foreground text-sm">N/A</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <img
+                                  src={`http://localhost:8000/${plate.image_path}`}
+                                  alt={`Detected plate ${plate.plate_text}`}
+                                  className="h-16 rounded-md border"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">{plate.plate_text}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                {plate.vehicle_type ? (
+                                  <Badge variant="secondary">{plate.vehicle_type}</Badge>
+                                ) : (
+                                  <span className="text-muted-foreground text-sm">N/A</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {plate.track_id !== undefined ? (
+                                  <Badge variant="outline">#{plate.track_id}</Badge>
+                                ) : (
+                                  <span className="text-muted-foreground text-sm">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right font-medium">                            {(plate.bbox_confidence * 100).toFixed(2)}%
+                              </TableCell>
+                              <TableCell className="text-right font-medium">                              {(plate.confidence * 100).toFixed(2)}%
+                              </TableCell>
+                              <TableCell className="text-right font-medium">
+                                {plate.vehicle_confidence
+                                  ? `${(plate.vehicle_confidence * 100).toFixed(2)}%`
+                                  : 'N/A'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : null}
+                  </CardContent>
+                </Card>
               )}
             </CardContent>
           </Card>

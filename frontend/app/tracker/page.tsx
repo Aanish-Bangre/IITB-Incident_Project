@@ -103,11 +103,10 @@ export default function HomePage() {
   const [cameraPath, setCameraPath] = useState("/h264");
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("theme");
-    if (storedTheme === "dark" || storedTheme === "light") {
-      setTheme(storedTheme);
-      document.documentElement.classList.toggle("dark", storedTheme === "dark");
-    }
+    const stored = localStorage.getItem("theme") as "light" | "dark" | null;
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const resolved = stored === "dark" || stored === "light" ? stored : (prefersDark ? "dark" : "light");
+    setTheme(resolved);
   }, []);
 
   useEffect(() => {
@@ -421,208 +420,208 @@ export default function HomePage() {
 
           <div className="mx-auto w-full max-w-6xl">
 
-        {/* Upload Section */}
-        {!showROISelector && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Source Selection</CardTitle>
-              <CardDescription>
-                Configure live RTSP camera feed for ANPR processing
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="camera-ip">Camera IP</Label>
-                  <Input
-                    id="camera-ip"
-                    value={cameraIp}
-                    onChange={(e) => setCameraIp(e.target.value)}
-                    disabled={status !== "idle" && status !== "failed"}
-                  />
-                </div>
+            {/* Upload Section */}
+            {!showROISelector && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>Source Selection</CardTitle>
+                  <CardDescription>
+                    Configure live RTSP camera feed for ANPR processing
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="camera-ip">Camera IP</Label>
+                      <Input
+                        id="camera-ip"
+                        value={cameraIp}
+                        onChange={(e) => setCameraIp(e.target.value)}
+                        disabled={status !== "idle" && status !== "failed"}
+                      />
+                    </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="camera-username">Username</Label>
-                    <Input
-                      id="camera-username"
-                      value={cameraUsername}
-                      onChange={(e) => setCameraUsername(e.target.value)}
-                      disabled={status !== "idle" && status !== "failed"}
-                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="camera-username">Username</Label>
+                        <Input
+                          id="camera-username"
+                          value={cameraUsername}
+                          onChange={(e) => setCameraUsername(e.target.value)}
+                          disabled={status !== "idle" && status !== "failed"}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="camera-password">Password</Label>
+                        <Input
+                          id="camera-password"
+                          type="password"
+                          value={cameraPassword}
+                          onChange={(e) => setCameraPassword(e.target.value)}
+                          disabled={status !== "idle" && status !== "failed"}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="camera-path">RTSP Path</Label>
+                      <Input
+                        id="camera-path"
+                        value={cameraPath}
+                        onChange={(e) => setCameraPath(e.target.value)}
+                        disabled={status !== "idle" && status !== "failed"}
+                      />
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="camera-password">Password</Label>
-                    <Input
-                      id="camera-password"
-                      type="password"
-                      value={cameraPassword}
-                      onChange={(e) => setCameraPassword(e.target.value)}
-                      disabled={status !== "idle" && status !== "failed"}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="camera-path">RTSP Path</Label>
-                  <Input
-                    id="camera-path"
-                    value={cameraPath}
-                    onChange={(e) => setCameraPath(e.target.value)}
+                  <Button
+                    onClick={handleCreateCameraJob}
                     disabled={status !== "idle" && status !== "failed"}
+                    className="w-full"
+                  >
+                    Connect Camera & Start Setup
+                  </Button>
+
+                  {jobId && (status === "processing" || status === "pending") && (
+                    <Button
+                      variant="destructive"
+                      onClick={handleStopCamera}
+                      className="w-full"
+                    >
+                      Stop Camera Stream
+                    </Button>
+                  )}
+
+                  {/* Status */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Status:</span>
+                      <Badge variant={statusBadgeVariant}>{statusLabel}</Badge>
+                    </div>
+                    <Progress value={progress} className="h-2" />
+                    <p className="text-sm text-muted-foreground">{message}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Live Camera Frame */}
+            {liveFrameUrl && !showROISelector && (status === "processing" || status === "pending") && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>Live Processed Frame</CardTitle>
+                  <CardDescription>
+                    Real-time annotated frame over WebSocket ({liveSocketStatus})
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <img
+                    src={liveFrameUrl}
+                    alt="Live stream frame"
+                    className="w-full rounded-lg border"
                   />
-                </div>
-              </div>
+                </CardContent>
+              </Card>
+            )}
 
-              <Button
-                onClick={handleCreateCameraJob}
-                disabled={status !== "idle" && status !== "failed"}
-                className="w-full"
-              >
-                Connect Camera & Start Setup
-              </Button>
+            {plates.length > 0 && !showROISelector && (status === "processing" || status === "pending" || status === "stopped" || status === "completed") && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>Detected Output</CardTitle>
+                  <CardDescription>
+                    Vehicle and plate detections captured after line crossing
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Vehicle Crop</TableHead>
+                        <TableHead>Plate Crop</TableHead>
+                        <TableHead>Plate Text</TableHead>
+                        <TableHead>Vehicle Type</TableHead>
+                        <TableHead>Track ID</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {plates.map((plate, idx) => (
+                        <TableRow key={`${plate.plate_text}-${plate.track_id}-${idx}`}>
+                          <TableCell>
+                            {plate.vehicle_image_path ? (
+                              <img
+                                src={`${API.defaults.baseURL}/${plate.vehicle_image_path}`}
+                                alt={`Vehicle ${plate.track_id ?? ""}`}
+                                className="h-10 w-24 rounded border object-cover"
+                              />
+                            ) : (
+                              "-"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {plate.image_path ? (
+                              <img
+                                src={`${API.defaults.baseURL}/${plate.image_path}`}
+                                alt={`Plate ${plate.plate_text}`}
+                                className="h-10 w-24 rounded border object-cover"
+                              />
+                            ) : (
+                              "-"
+                            )}
+                          </TableCell>
+                          <TableCell className="font-medium">{plate.plate_text || "-"}</TableCell>
+                          <TableCell>{plate.vehicle_type ?? "-"}</TableCell>
+                          <TableCell>{plate.track_id ?? "-"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
 
-              {jobId && (status === "processing" || status === "pending") && (
-                <Button
-                  variant="destructive"
-                  onClick={handleStopCamera}
-                  className="w-full"
-                >
-                  Stop Camera Stream
-                </Button>
-              )}
-
-              {/* Status */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Status:</span>
-                  <Badge variant={statusBadgeVariant}>{statusLabel}</Badge>
-                </div>
-                <Progress value={progress} className="h-2" />
-                <p className="text-sm text-muted-foreground">{message}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Live Camera Frame */}
-        {liveFrameUrl && !showROISelector && (status === "processing" || status === "pending") && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Live Processed Frame</CardTitle>
-              <CardDescription>
-                Real-time annotated frame over WebSocket ({liveSocketStatus})
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <img
-                src={liveFrameUrl}
-                alt="Live stream frame"
-                className="w-full rounded-lg border"
+            {/* ROI/Line Selector */}
+            {showROISelector && firstFrameUrl && jobId && (
+              <ROILineSelector
+                jobId={jobId}
+                imageUrl={firstFrameUrl}
+                onComplete={handleROILineComplete}
+                onSkip={handleSkipROILine}
               />
-            </CardContent>
-          </Card>
-        )}
+            )}
 
-        {plates.length > 0 && !showROISelector && (status === "processing" || status === "pending" || status === "stopped" || status === "completed") && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Detected Output</CardTitle>
-              <CardDescription>
-                Vehicle and plate detections captured after line crossing
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Vehicle Crop</TableHead>
-                    <TableHead>Plate Crop</TableHead>
-                    <TableHead>Plate Text</TableHead>
-                    <TableHead>Vehicle Type</TableHead>
-                    <TableHead>Track ID</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {plates.map((plate, idx) => (
-                    <TableRow key={`${plate.plate_text}-${plate.track_id}-${idx}`}>
-                      <TableCell>
-                        {plate.vehicle_image_path ? (
-                          <img
-                            src={`${API.defaults.baseURL}/${plate.vehicle_image_path}`}
-                            alt={`Vehicle ${plate.track_id ?? ""}`}
-                            className="h-10 w-24 rounded border object-cover"
-                          />
-                        ) : (
-                          "-"
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {plate.image_path ? (
-                          <img
-                            src={`${API.defaults.baseURL}/${plate.image_path}`}
-                            alt={`Plate ${plate.plate_text}`}
-                            className="h-10 w-24 rounded border object-cover"
-                          />
-                        ) : (
-                          "-"
-                        )}
-                      </TableCell>
-                      <TableCell className="font-medium">{plate.plate_text || "-"}</TableCell>
-                      <TableCell>{plate.vehicle_type ?? "-"}</TableCell>
-                      <TableCell>{plate.track_id ?? "-"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
+            {/* Processed Video */}
+            {status === "completed" && processedVideoPath && !showROISelector && (
+              <Card className="mb-6">
+                <CardHeader>
+                  <CardTitle>Processed Video with Tracking</CardTitle>
+                  <CardDescription>
+                    Annotated video showing tracked vehicles, ROI polygon, and counting line
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <video
+                    src={`http://localhost:8000/${processedVideoPath}`}
+                    controls
+                    className="w-full rounded-lg border"
+                    preload="metadata"
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                </CardContent>
+              </Card>
+            )}
 
-        {/* ROI/Line Selector */}
-        {showROISelector && firstFrameUrl && jobId && (
-          <ROILineSelector
-            jobId={jobId}
-            imageUrl={firstFrameUrl}
-            onComplete={handleROILineComplete}
-            onSkip={handleSkipROILine}
-          />
-        )}
-
-        {/* Processed Video */}
-        {status === "completed" && processedVideoPath && !showROISelector && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Processed Video with Tracking</CardTitle>
-              <CardDescription>
-                Annotated video showing tracked vehicles, ROI polygon, and counting line
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <video
-                src={`http://localhost:8000/${processedVideoPath}`}
-                controls
-                className="w-full rounded-lg border"
-                preload="metadata"
-              >
-                Your browser does not support the video tag.
-              </video>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* No Results */}
-        {status === "completed" && plates.length === 0 && (
-          <Alert>
-            <AlertTitle>No Plates Detected</AlertTitle>
-            <AlertDescription>
-              No number plates were detected in tracked vehicles that crossed the counting line.
-              Try adjusting the ROI or counting line position.
-            </AlertDescription>
-          </Alert>
-        )}
+            {/* No Results */}
+            {status === "completed" && plates.length === 0 && (
+              <Alert>
+                <AlertTitle>No Plates Detected</AlertTitle>
+                <AlertDescription>
+                  No number plates were detected in tracked vehicles that crossed the counting line.
+                  Try adjusting the ROI or counting line position.
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         </main>
       </SidebarInset>

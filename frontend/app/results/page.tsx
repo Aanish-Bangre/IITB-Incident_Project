@@ -79,11 +79,10 @@ export default function ResultsPage() {
   const [isLoadingResults, setIsLoadingResults] = useState(false);
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("theme");
-    if (storedTheme === "dark" || storedTheme === "light") {
-      setTheme(storedTheme);
-      document.documentElement.classList.toggle("dark", storedTheme === "dark");
-    }
+    const stored = localStorage.getItem("theme") as "light" | "dark" | null;
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const resolved = stored === "dark" || stored === "light" ? stored : (prefersDark ? "dark" : "light");
+    setTheme(resolved);
   }, []);
 
   useEffect(() => {
@@ -242,7 +241,7 @@ export default function ResultsPage() {
                       </TableHeader>
                       <TableBody>
                         {jobs.map((job) => (
-                          <TableRow 
+                          <TableRow
                             key={job.job_id}
                             className={selectedJob === job.job_id ? "bg-muted" : ""}
                           >
