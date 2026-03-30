@@ -334,6 +334,16 @@ export default function HomePage() {
 
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
+  const dedupedPlates = Object.values(
+    plates.reduce((acc, plate) => {
+      const key = plate.track_id ?? `no-id-${plate.plate_text}`;
+      if (!acc[key] || (plate.confidence ?? 0) > (acc[key].confidence ?? 0)) {
+        acc[key] = plate;
+      }
+      return acc;
+    }, {} as Record<string | number, Plate>)
+  );
+
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
@@ -545,8 +555,8 @@ export default function HomePage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {plates.map((plate, idx) => (
-                        <TableRow key={`${plate.plate_text}-${plate.track_id}-${idx}`}>
+                      {dedupedPlates.map((plate, idx) => (
+                        <TableRow key={`${plate.track_id}-${idx}`}>
                           <TableCell>
                             {plate.vehicle_image_path ? (
                               <img

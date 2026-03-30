@@ -96,6 +96,16 @@ export default function Home() {
 
   const statusLabel = useMemo(() => status.charAt(0).toUpperCase() + status.slice(1), [status]);
 
+  const dedupedPlates = Object.values(
+    plates.reduce((acc, plate) => {
+      const key = plate.track_id ?? `no-id-${plate.plate_text}`;
+      if (!acc[key] || (plate.confidence ?? 0) > (acc[key].confidence ?? 0)) {
+        acc[key] = plate;
+      }
+      return acc;
+    }, {} as Record<string | number, Plate>)
+  );
+
   useEffect(() => {
     const stored = localStorage.getItem("theme") as "light" | "dark" | null;
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -447,7 +457,7 @@ export default function Home() {
                       Best-confidence image and OCR text grouped by plate string.
                     </CardDescription>
                     <CardAction>
-                      <Badge variant="secondary">{plates.length} result(s)</Badge>
+                        <Badge variant="secondary">{dedupedPlates.length} result(s)</Badge>
                     </CardAction>
                   </CardHeader>
                   <CardContent>
@@ -483,8 +493,8 @@ export default function Home() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {plates.map((plate, index) => (
-                            <TableRow key={`${plate.plate_text}-${index}`}>
+                          {dedupedPlates.map((plate, index) => (
+                            <TableRow key={`${plate.track_id ?? plate.plate_text}-${index}`}>
                               <TableCell>
                                 {plate.vehicle_image_path ? (
                                   <img

@@ -4,6 +4,8 @@ import os
 import re
 import cv2
 import json
+import queue
+import threading
 import numpy as np
 import subprocess
 import time
@@ -35,21 +37,63 @@ def _is_rtsp_source(source: str) -> bool:
 
 
 def _open_capture_with_retry(source: str, retries: int = 5, retry_delay: float = 1.0):
-    if _is_rtsp_source(source):
+    is_rtsp = _is_rtsp_source(source)
+    if is_rtsp:
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-            "rtsp_transport;tcp|timeout;5000000|reorder_queue_size;100|buffer_size;1024000"
+            "rtsp_transport;tcp"
+            "|timeout;3000000"
+            "|stimeout;3000000"
+            "|reorder_queue_size;0"
+            "|buffer_size;1048576"
+            "|fflags;nobuffer+discardcorrupt"
+            "|flags;low_delay"
+            "|thread_type;slice"
+            "|threads;1"
         )
+        params = [
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000,
+        ]
+    else:
+        params = []
 
-    cap = None
-    for _ in range(retries):
-        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+    for attempt in range(retries):
+        if is_rtsp:
+            cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG, params)
+        else:
+            cap = cv2.VideoCapture(source)
+
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         time.sleep(retry_delay)
-        if cap.isOpened():
-            return cap
-        if cap is not None:
-            cap.release()
 
-    return cap
+        if cap.isOpened():
+            for _ in range(3):
+                cap.grab()
+            print(f"[INFO] Stream opened on attempt {attempt + 1}")
+            return cap
+
+        cap.release()
+        print(f"[WARN] Capture open failed attempt {attempt + 1}/{retries}")
+
+    return None
+
+
+def _safe_cap_read(cap, timeout_sec: float = 5.0):
+    """Read a frame with a hard timeout to prevent cap.read() hangs."""
+    result = [False, None]
+
+    def _read():
+        result[0], result[1] = cap.read()
+
+    read_thread = threading.Thread(target=_read, daemon=True)
+    read_thread.start()
+    read_thread.join(timeout=timeout_sec)
+
+    if read_thread.is_alive():
+        print(f"[WARN] cap.read() timed out after {timeout_sec}s - stream stalled")
+        return False, None, True
+
+    return result[0], result[1], False
 
 
 def is_inside(inner, outer):
@@ -124,7 +168,7 @@ def _upsert_plate_record(
     db.commit()
 
 
-def run_pipeline_with_tracking(job_id: str, video_path: str, db):
+def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: queue.Queue | None = None):
     """Pipeline with ROI filtering and line crossing detection"""
     
     # Get job to retrieve ROI and line coords
@@ -200,6 +244,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
     live_frame_path = os.path.join("media", "frames", f"{job_id}_live.jpg")
     is_camera_stream = job.job_type == "camera_stream"
     consecutive_read_failures = 0
+    expected_h, expected_w = None, None
 
     while True:
         if is_camera_stream and frame_count > 0 and frame_count % 30 == 0:
@@ -210,16 +255,60 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
             job.last_frame_processed_at = datetime.utcnow()
             db.commit()
 
-        ret, frame = cap.read()
-        if not ret:
+        if cap is None or not cap.isOpened():
+            cap = _open_capture_with_retry(video_path, retries=5, retry_delay=1.0)
+            if cap is None or not cap.isOpened():
+                if not is_camera_stream:
+                    break
+                print(f"[ERROR] Reconnect failed for job {job_id}, retrying in 5s...")
+                time.sleep(5.0)
+                continue
+
+        ret, frame, timed_out = _safe_cap_read(cap, timeout_sec=5.0)
+
+        if timed_out:
+            print(f"[WARN] Stream stalled for job {job_id}, reconnecting...")
+            old_cap = cap
+            old_cap.release()
+            time.sleep(1.5)
+            new_cap = _open_capture_with_retry(video_path, retries=5, retry_delay=1.0)
+            cap = new_cap
+            if cap is None or not cap.isOpened():
+                if not is_camera_stream:
+                    break
+                print(f"[ERROR] Reconnect failed for job {job_id}, retrying in 5s...")
+                time.sleep(5.0)
+            consecutive_read_failures = 0
+            continue
+
+        if not ret or frame is None:
             if not is_camera_stream:
                 break
 
             consecutive_read_failures += 1
-            if consecutive_read_failures > 40:
-                print(f"[WARN] Camera stream stalled for job {job_id}, stopping stream processing")
-                break
+            if consecutive_read_failures > 5:
+                print(f"[WARN] {consecutive_read_failures} consecutive failures, reconnecting...")
+                old_cap = cap
+                time.sleep(2.0)
+                old_cap.release()
+                time.sleep(1.5)
+                new_cap = _open_capture_with_retry(video_path, retries=3, retry_delay=2.0)
+                cap = new_cap
+                if cap is None or not cap.isOpened():
+                    print(f"[ERROR] Reconnect failed, stopping job {job_id}")
+                    break
+                consecutive_read_failures = 0
             time.sleep(0.05)
+            continue
+
+        if expected_h is None:
+            expected_h, expected_w = frame.shape[0], frame.shape[1]
+
+        if frame.shape[0] != expected_h or frame.shape[1] != expected_w:
+            print(
+                f"[WARN] Skipping frame with unexpected size {frame.shape} "
+                f"(expected {expected_h}x{expected_w})"
+            )
             continue
 
         consecutive_read_failures = 0
@@ -400,6 +489,12 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
 
         out.write(display_frame)
+
+        if frame_queue is not None:
+            try:
+                frame_queue.put_nowait(display_frame.copy())
+            except queue.Full:
+                pass
 
         if is_camera_stream and frame_count % 5 == 0:
             cv2.imwrite(live_frame_path, display_frame)

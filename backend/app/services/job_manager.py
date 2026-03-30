@@ -1,8 +1,10 @@
+import queue
+
 from app.db.database import SessionLocal
 from app.db.models import Job
 from app.ai.pipeline_with_tracking import run_pipeline_with_tracking
 
-def process_job(job_id: str):
+def process_job(job_id: str, frame_queue: queue.Queue | None = None):
     db = SessionLocal()
     job = db.query(Job).filter(Job.job_id == job_id).first()
 
@@ -21,7 +23,7 @@ def process_job(job_id: str):
         if not source_path:
             raise Exception("No valid source path found for job")
 
-        run_pipeline_with_tracking(job_id, source_path, db)
+        run_pipeline_with_tracking(job_id, source_path, db, frame_queue=frame_queue)
 
         db.refresh(job)
         if job.status != "stopped":

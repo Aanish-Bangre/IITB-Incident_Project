@@ -128,6 +128,18 @@ export default function ResultsPage() {
     return "secondary" as const;
   };
 
+  const dedupedJobPlates = jobResults
+    ? Object.values(
+      jobResults.plates.reduce((acc, plate) => {
+        const key = plate.track_id ?? `no-id-${plate.plate_text}`;
+        if (!acc[key] || (plate.confidence ?? 0) > (acc[key].confidence ?? 0)) {
+          acc[key] = plate;
+        }
+        return acc;
+      }, {} as Record<string | number, Plate>)
+    )
+    : [];
+
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <Sidebar
@@ -320,12 +332,12 @@ export default function ResultsPage() {
                           </CardDescription>
                           <CardAction>
                             <Badge variant="secondary">
-                              {jobResults.total_plates} result(s)
+                              {dedupedJobPlates.length} result(s)
                             </Badge>
                           </CardAction>
                         </CardHeader>
                         <CardContent>
-                          {jobResults.plates.length === 0 ? (
+                          {dedupedJobPlates.length === 0 ? (
                             <Alert>
                               <AlertTitle>No plates found</AlertTitle>
                               <AlertDescription>
@@ -347,8 +359,8 @@ export default function ResultsPage() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {jobResults.plates.map((plate, index) => (
-                                  <TableRow key={`${plate.plate_text}-${index}`}>
+                                {dedupedJobPlates.map((plate, index) => (
+                                  <TableRow key={`${plate.track_id ?? plate.plate_text}-${index}`}>
                                     <TableCell>
                                       {plate.vehicle_image_path ? (
                                         <img

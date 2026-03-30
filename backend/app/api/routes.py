@@ -2,6 +2,8 @@
 
 from datetime import datetime
 import asyncio
+import queue
+import threading
 from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -24,6 +26,9 @@ MEDIA_DIR = "media/videos"
 FRAMES_DIR = "media/frames"
 os.makedirs(MEDIA_DIR, exist_ok=True)
 os.makedirs(FRAMES_DIR, exist_ok=True)
+
+# Global registry for live camera streams: job_id -> latest-frame queue.
+active_frame_queues: dict[str, queue.Queue] = {}
 
 
 class ROILineRequest(BaseModel):
@@ -53,6 +58,13 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _process_camera_job_with_queue(job_id: str, frame_queue: queue.Queue):
+    try:
+        process_job(job_id, frame_queue=frame_queue)
+    finally:
+        active_frame_queues.pop(job_id, None)
 
 
 def _build_rtsp_url(username: str, password: str, ip_address: str, path: str) -> str:
@@ -295,7 +307,6 @@ def get_camera_first_frame(job_id: str, db: Session = Depends(get_db)):
 def start_camera_job(
     job_id: str,
     request: CameraStartRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     job = db.query(Job).filter(Job.job_id == job_id).first()
@@ -317,7 +328,16 @@ def start_camera_job(
     job.stream_started_at = datetime.utcnow()
     db.commit()
 
-    background_tasks.add_task(process_job, job_id)
+    frame_q = queue.Queue(maxsize=2)
+    active_frame_queues[job_id] = frame_q
+
+    thread = threading.Thread(
+        target=_process_camera_job_with_queue,
+        args=(job_id, frame_q),
+        daemon=True,
+        name=f"pipeline-{job_id}",
+    )
+    thread.start()
 
     return {
         "job_id": job.job_id,
@@ -340,6 +360,7 @@ def stop_camera_job(job_id: str, db: Session = Depends(get_db)):
     if job.status in {"processing", "pending"}:
         job.status = "stopped"
     db.commit()
+    active_frame_queues.pop(job_id, None)
 
     return {
         "job_id": job.job_id,
@@ -362,33 +383,41 @@ async def camera_live_ws(websocket: WebSocket, job_id: str):
     await websocket.accept()
 
     db = SessionLocal()
-    live_frame_path = os.path.join(FRAMES_DIR, f"{job_id}_live.jpg")
-    last_mtime = None
+    frame_queue = active_frame_queues.get(job_id)
+    status_check_counter = 0
+
+    if frame_queue is None:
+        await websocket.send_json({"type": "error", "message": "Live stream queue not available"})
+        await websocket.close()
+        db.close()
+        return
 
     try:
         while True:
-            job = db.query(Job).filter(Job.job_id == job_id).first()
-            if not job:
-                await websocket.send_json({"type": "error", "message": "Job not found"})
-                break
+            status_check_counter += 1
+            if status_check_counter >= 25:
+                status_check_counter = 0
+                db.expire_all()
+                job = db.query(Job).filter(Job.job_id == job_id).first()
+                if not job:
+                    await websocket.send_json({"type": "done", "status": "unknown"})
+                    break
+                if job.job_type != "camera_stream":
+                    await websocket.send_json({"type": "error", "message": "Not a camera stream job"})
+                    break
+                if job.status in {"completed", "failed", "stopped"}:
+                    await websocket.send_json({"type": "done", "status": job.status})
+                    break
 
-            if job.job_type != "camera_stream":
-                await websocket.send_json({"type": "error", "message": "Not a camera stream job"})
-                break
-
-            if os.path.exists(live_frame_path):
-                current_mtime = os.path.getmtime(live_frame_path)
-                if last_mtime is None or current_mtime > last_mtime:
-                    with open(live_frame_path, "rb") as image_file:
-                        await websocket.send_bytes(image_file.read())
-                    last_mtime = current_mtime
-
-            if job.status in {"completed", "failed", "stopped"}:
-                await websocket.send_json({"type": "done", "status": job.status})
-                break
-
-            await asyncio.sleep(0.2)
-            db.expire_all()
+            try:
+                frame = frame_queue.get_nowait()
+                ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                if ok:
+                    await websocket.send_bytes(encoded.tobytes())
+            except queue.Empty:
+                await asyncio.sleep(0.04)
+                continue
+            await asyncio.sleep(0.01)
 
     except WebSocketDisconnect:
         pass
