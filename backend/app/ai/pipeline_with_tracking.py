@@ -83,9 +83,13 @@ def _safe_cap_read(cap, timeout_sec: float = 5.0):
     result = [False, None]
 
     def _read():
-        result[0], result[1] = cap.read()
+        try:
+            result[0], result[1] = cap.read()
+        except Exception:
+            # Capture may already be released by reconnect logic.
+            result[0], result[1] = False, None
 
-    read_thread = threading.Thread(target=_read, daemon=True)
+    read_thread = threading.Thread(target=_read, daemon=True, name="_read")
     read_thread.start()
     read_thread.join(timeout=timeout_sec)
 
@@ -286,7 +290,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                 break
 
             consecutive_read_failures += 1
-            if consecutive_read_failures > 5:
+            if consecutive_read_failures > 2:
                 print(f"[WARN] {consecutive_read_failures} consecutive failures, reconnecting...")
                 old_cap = cap
                 time.sleep(2.0)

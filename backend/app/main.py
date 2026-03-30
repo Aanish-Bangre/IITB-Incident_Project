@@ -1,5 +1,9 @@
 # backend/app/main.py
 
+import os
+
+os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
+
 from fastapi import FastAPI
 from app.api.routes import router
 from app.db.database import engine
