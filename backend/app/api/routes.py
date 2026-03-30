@@ -362,11 +362,28 @@ def stop_camera_job(job_id: str, db: Session = Depends(get_db)):
     db.commit()
     active_frame_queues.pop(job_id, None)
 
+    plates = db.query(Plate).filter(Plate.job_id == job_id).all()
+
     return {
         "job_id": job.job_id,
         "status": job.status,
         "is_live": job.is_live,
-        "message": "Stop signal sent"
+        "message": "Stop signal sent",
+        "total_plates": len(plates),
+        "plates": [
+            {
+                "plate_text": plate.plate_text,
+                "confidence": plate.best_confidence,
+                "bbox_confidence": plate.bbox_confidence,
+                "image_path": plate.best_image_path,
+                "vehicle_type": plate.vehicle_type,
+                "vehicle_confidence": plate.vehicle_confidence,
+                "vehicle_image_path": plate.vehicle_image_path,
+                "track_id": plate.track_id,
+                "frame_number": plate.frame_number,
+            }
+            for plate in plates
+        ],
     }
 
 

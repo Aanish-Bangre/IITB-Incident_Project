@@ -206,8 +206,26 @@ export default function HomePage() {
     if (!jobId) return;
 
     try {
-      await stopCameraJob(jobId);
-      setMessage("Camera stop signal sent.");
+      const response = await stopCameraJob(jobId);
+      const data = response.data;
+
+      setLiveSocketStatus("disconnected");
+      setStatus("stopped");
+      setProgress(100);
+
+      if (Array.isArray(data?.plates)) {
+        setPlates(data.plates);
+      } else {
+        setPlates([]);
+      }
+
+      if (typeof data?.processed_video === "string") {
+        setProcessedVideoPath(data.processed_video);
+      }
+
+      setMessage(
+        `Camera stop signal sent. Loaded ${Array.isArray(data?.plates) ? data.plates.length : 0} result(s).`
+      );
     } catch (error) {
       console.error("Failed to stop camera job:", error);
       setMessage("Failed to stop camera stream.");
