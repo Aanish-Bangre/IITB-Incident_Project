@@ -1,6 +1,8 @@
 # backend/app/api/routes.py
 
-from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks
+from datetime import datetime
+import asyncio
+from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.db.models import Job, Plate
@@ -12,6 +14,7 @@ import shutil
 import uuid
 import cv2
 import json
+import urllib.parse
 
 from app.services.job_manager import process_job
 
@@ -27,6 +30,21 @@ class ROILineRequest(BaseModel):
     job_id: str
     roi_coords: Optional[List[List[int]]] = None  # [[x1,y1], [x2,y2], ...]
     line_coords: Optional[List[int]] = None  # [x1, y1, x2, y2]
+    line_distance_meters: Optional[float] = None
+
+
+class CameraCreateRequest(BaseModel):
+    username: str
+    password: str
+    ip_address: str
+    path: str = "/h264"
+    name: Optional[str] = None
+
+
+class CameraStartRequest(BaseModel):
+    roi_coords: Optional[List[List[int]]] = None
+    line_coords: Optional[List[int]] = None
+    line_distance_meters: Optional[float] = None
 
 
 def get_db():
@@ -35,6 +53,31 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _build_rtsp_url(username: str, password: str, ip_address: str, path: str) -> str:
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    safe_password = urllib.parse.quote(password)
+    return f"rtsp://{username}:{safe_password}@{ip_address}{normalized_path}"
+
+
+def _capture_first_frame(source: str, output_path: str) -> bool:
+    if source.startswith("rtsp://"):
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+            "rtsp_transport;tcp|timeout;5000000|reorder_queue_size;100|buffer_size;1024000"
+        )
+        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+    else:
+        cap = cv2.VideoCapture(source)
+
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret:
+        return False
+
+    cv2.imwrite(output_path, frame)
+    return True
 
 
 @router.post("/upload-video")
@@ -77,14 +120,11 @@ def get_first_frame(job_id: str, db: Session = Depends(get_db)):
     
     # Extract first frame if not exists
     if not os.path.exists(frame_path):
-        cap = cv2.VideoCapture(job.video_path)
-        ret, frame = cap.read()
-        cap.release()
-        
-        if not ret:
+        if not job.video_path:
+            return {"error": "No video source found"}
+
+        if not _capture_first_frame(job.video_path, frame_path):
             return {"error": "Could not read video"}
-        
-        cv2.imwrite(frame_path, frame)
     
     return FileResponse(frame_path, media_type="image/jpeg")
 
@@ -106,12 +146,14 @@ def set_roi_line(
         job.roi_coords = json.dumps(request.roi_coords)
     if request.line_coords:
         job.line_coords = json.dumps(request.line_coords)
+    if request.line_distance_meters is not None:
+        job.line_distance_meters = request.line_distance_meters
     
     job.status = "pending"
     db.commit()
     
     # Start processing in background
-    background_tasks.add_task(process_job, request.job_id, db)
+    background_tasks.add_task(process_job, request.job_id)
     
     return {
         "job_id": job.job_id,
@@ -129,7 +171,10 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)):
 
     return {
         "job_id": job.job_id,
-        "status": job.status
+        "status": job.status,
+        "job_type": job.job_type,
+        "is_live": job.is_live,
+        "live_frame": f"media/frames/{job_id}_live.jpg" if os.path.exists(os.path.join(FRAMES_DIR, f"{job_id}_live.jpg")) else None
     }
 
 
@@ -148,7 +193,10 @@ def list_all_jobs(db: Session = Depends(get_db)):
                 "processed_video_path": job.processed_video_path,
                 "created_at": job.created_at.isoformat() if job.created_at else None,
                 "roi_coords": job.roi_coords,
-                "line_coords": job.line_coords
+                "line_coords": job.line_coords,
+                "job_type": job.job_type,
+                "is_live": job.is_live,
+                "camera_rtsp_url": job.camera_rtsp_url
             }
             for job in jobs
         ]
@@ -162,16 +210,9 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
     if not job:
         return {"error": "Job not found"}
 
-    if job.status != "completed":
-        return {
-            "job_id": job_id,
-            "status": job.status,
-            "message": "Job not completed yet"
-        }
-
     plates = db.query(Plate).filter(Plate.job_id == job_id).all()
 
-    return {
+    response = {
         "job_id": job_id,
         "status": job.status,
         "processed_video": job.processed_video_path,
@@ -186,8 +227,170 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
                 "vehicle_confidence": plate.vehicle_confidence,
                 "vehicle_image_path": plate.vehicle_image_path,
                 "track_id": plate.track_id,
-                "frame_number": plate.frame_number
+                "frame_number": plate.frame_number,
+                "speed_kmh": plate.speed_kmh
             }
             for plate in plates
         ]
     }
+
+    if job.status not in {"completed", "stopped"}:
+        response["message"] = "Live partial detections"
+
+    return response
+
+
+@router.post("/camera-job/create")
+def create_camera_job(request: CameraCreateRequest, db: Session = Depends(get_db)):
+    rtsp_url = _build_rtsp_url(request.username, request.password, request.ip_address, request.path)
+    job_id = str(uuid.uuid4())
+
+    camera_config = {
+        "name": request.name or request.ip_address,
+        "ip_address": request.ip_address,
+        "path": request.path,
+        "username": request.username
+    }
+
+    new_job = Job(
+        job_id=job_id,
+        video_path="",
+        status="uploaded",
+        job_type="camera_stream",
+        camera_rtsp_url=rtsp_url,
+        camera_config=json.dumps(camera_config),
+        is_live="false"
+    )
+
+    db.add(new_job)
+    db.commit()
+    db.refresh(new_job)
+
+    return {
+        "job_id": new_job.job_id,
+        "status": new_job.status,
+        "job_type": new_job.job_type
+    }
+
+
+@router.get("/camera-job/{job_id}/first-frame")
+def get_camera_first_frame(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.job_type != "camera_stream":
+        raise HTTPException(status_code=400, detail="Not a camera stream job")
+    if not job.camera_rtsp_url:
+        raise HTTPException(status_code=400, detail="Camera RTSP URL is missing")
+
+    frame_path = os.path.join(FRAMES_DIR, f"{job_id}_first_frame.jpg")
+    if not _capture_first_frame(job.camera_rtsp_url, frame_path):
+        raise HTTPException(status_code=500, detail="Could not read camera stream")
+
+    return FileResponse(frame_path, media_type="image/jpeg")
+
+
+@router.post("/camera-job/{job_id}/start")
+def start_camera_job(
+    job_id: str,
+    request: CameraStartRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.job_type != "camera_stream":
+        raise HTTPException(status_code=400, detail="Not a camera stream job")
+
+    if request.roi_coords:
+        job.roi_coords = json.dumps(request.roi_coords)
+    if request.line_coords:
+        job.line_coords = json.dumps(request.line_coords)
+    if request.line_distance_meters is not None:
+        job.line_distance_meters = request.line_distance_meters
+
+    job.status = "pending"
+    job.is_live = "true"
+    job.stream_started_at = datetime.utcnow()
+    db.commit()
+
+    background_tasks.add_task(process_job, job_id)
+
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "is_live": job.is_live,
+        "message": "Live camera processing started"
+    }
+
+
+@router.post("/camera-job/{job_id}/stop")
+def stop_camera_job(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.job_type != "camera_stream":
+        raise HTTPException(status_code=400, detail="Not a camera stream job")
+
+    job.is_live = "false"
+    if job.status in {"processing", "pending"}:
+        job.status = "stopped"
+    db.commit()
+
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "is_live": job.is_live,
+        "message": "Stop signal sent"
+    }
+
+
+@router.get("/camera-job/{job_id}/live-frame")
+def get_camera_live_frame(job_id: str):
+    live_frame_path = os.path.join(FRAMES_DIR, f"{job_id}_live.jpg")
+    if not os.path.exists(live_frame_path):
+        raise HTTPException(status_code=404, detail="Live frame not available yet")
+    return FileResponse(live_frame_path, media_type="image/jpeg")
+
+
+@router.websocket("/ws/camera-job/{job_id}/live")
+async def camera_live_ws(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+
+    db = SessionLocal()
+    live_frame_path = os.path.join(FRAMES_DIR, f"{job_id}_live.jpg")
+    last_mtime = None
+
+    try:
+        while True:
+            job = db.query(Job).filter(Job.job_id == job_id).first()
+            if not job:
+                await websocket.send_json({"type": "error", "message": "Job not found"})
+                break
+
+            if job.job_type != "camera_stream":
+                await websocket.send_json({"type": "error", "message": "Not a camera stream job"})
+                break
+
+            if os.path.exists(live_frame_path):
+                current_mtime = os.path.getmtime(live_frame_path)
+                if last_mtime is None or current_mtime > last_mtime:
+                    with open(live_frame_path, "rb") as image_file:
+                        await websocket.send_bytes(image_file.read())
+                    last_mtime = current_mtime
+
+            if job.status in {"completed", "failed", "stopped"}:
+                await websocket.send_json({"type": "done", "status": job.status})
+                break
+
+            await asyncio.sleep(0.2)
+            db.expire_all()
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        db.close()

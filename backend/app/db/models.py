@@ -10,11 +10,18 @@ class Job(Base):
     __tablename__ = "jobs"
 
     job_id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    video_path = Column(String, nullable=False)
+    video_path = Column(String, nullable=True)
     processed_video_path = Column(String, nullable=True)
     status = Column(String, default="pending")
     roi_coords = Column(String, nullable=True)  # JSON string of polygon points
     line_coords = Column(String, nullable=True)  # JSON string of line points
+    line_distance_meters = Column(Float, nullable=True)
+    job_type = Column(String, default="video_upload")
+    is_live = Column(String, default="false")
+    camera_rtsp_url = Column(String, nullable=True)
+    camera_config = Column(String, nullable=True)
+    stream_started_at = Column(DateTime(timezone=True), nullable=True)
+    last_frame_processed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Plate(Base):
@@ -36,6 +43,7 @@ class Plate(Base):
     track_id = Column(Integer, nullable=True)  # Vehicle tracking ID
     frame_number = Column(Integer, nullable=True)  # Frame when detected
     crossed_line = Column(Integer, default=1)  # 1 if crossed line (filtered)
+    speed_kmh = Column(Float, nullable=True)
 
 
 

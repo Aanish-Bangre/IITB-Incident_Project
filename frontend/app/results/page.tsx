@@ -170,6 +170,14 @@ export default function ResultsPage() {
                     </a>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Tracker" asChild>
+                    <a href="/tracker">
+                      <Camera />
+                      <span>Tracker</span>
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

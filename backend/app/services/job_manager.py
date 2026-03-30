@@ -1,24 +1,39 @@
-from sqlalchemy.orm import Session
+from app.db.database import SessionLocal
 from app.db.models import Job
 from app.ai.pipeline_with_tracking import run_pipeline_with_tracking
 
-def process_job(job_id: str, db: Session):
+def process_job(job_id: str):
+    db = SessionLocal()
     job = db.query(Job).filter(Job.job_id == job_id).first()
 
     if not job:
+        db.close()
         return
 
     try:
         job.status = "processing"
         db.commit()
 
-        run_pipeline_with_tracking(job_id, job.video_path, db)
+        source_path = job.video_path
+        if job.job_type == "camera_stream":
+            source_path = job.camera_rtsp_url or job.video_path
 
-        job.status = "completed"
+        if not source_path:
+            raise Exception("No valid source path found for job")
+
+        run_pipeline_with_tracking(job_id, source_path, db)
+
+        db.refresh(job)
+        if job.status != "stopped":
+            job.status = "completed"
+        job.is_live = "false"
         db.commit()
 
     except Exception as e:
         job.status = "failed"
+        job.is_live = "false"
         db.commit()
 
         print(f"[ERROR] Job {job_id} failed: {e}")
+    finally:
+        db.close()

@@ -221,6 +221,13 @@ docker compose up
    - Click "Choose File" and select a video
    - Click "Upload and Process"
 
+1. **Or Use RTSP Camera (Real-Time)**
+  - Open Tracker page (http://localhost:3000/tracker)
+  - Switch source to **RTSP Camera**
+  - Enter camera IP, username, password, and path (e.g. `/h264`)
+  - Click **Connect Camera & Start Setup**
+  - Select ROI + line and start live processing
+
 2. **Configure ROI & Line** (Optional)
    - After upload, click on video frame to draw ROI polygon
    - Complete polygon, then draw counting line
@@ -249,6 +256,46 @@ docker compose up
 ## 📡 API Documentation
 
 ### Endpoints
+
+#### Create Camera Job
+```http
+POST /camera-job/create
+Content-Type: application/json
+
+{
+  "username": "gpatil",
+  "password": "gpatil@2026",
+  "ip_address": "10.162.1.182",
+  "path": "/h264"
+}
+```
+
+#### Camera First Frame
+```http
+GET /camera-job/{job_id}/first-frame
+```
+
+#### Start Camera Processing
+```http
+POST /camera-job/{job_id}/start
+Content-Type: application/json
+
+{
+  "roi_coords": [[100, 100], [800, 100], [800, 600], [100, 600]],
+  "line_coords": [200, 350, 900, 350],
+  "line_distance_meters": 8.0
+}
+```
+
+#### Stop Camera Processing
+```http
+POST /camera-job/{job_id}/stop
+```
+
+#### Get Live Annotated Frame
+```http
+GET /camera-job/{job_id}/live-frame
+```
 
 #### Upload Video
 ```http

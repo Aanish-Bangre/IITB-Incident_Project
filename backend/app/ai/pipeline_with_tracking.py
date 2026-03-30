@@ -6,6 +6,8 @@ import cv2
 import json
 import numpy as np
 import subprocess
+import time
+from datetime import datetime
 from collections import defaultdict
 
 from app.ai.plate_detector import detect_plates
@@ -28,6 +30,28 @@ MIN_OCR_CONF = 0.45  # Lowered to capture plates earlier
 DEBUG_OCR = True  # Enable OCR debugging
 
 
+def _is_rtsp_source(source: str) -> bool:
+    return isinstance(source, str) and source.lower().startswith("rtsp://")
+
+
+def _open_capture_with_retry(source: str, retries: int = 5, retry_delay: float = 1.0):
+    if _is_rtsp_source(source):
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+            "rtsp_transport;tcp|timeout;5000000|reorder_queue_size;100|buffer_size;1024000"
+        )
+
+    cap = None
+    for _ in range(retries):
+        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        time.sleep(retry_delay)
+        if cap.isOpened():
+            return cap
+        if cap is not None:
+            cap.release()
+
+    return cap
+
+
 def is_inside(inner, outer):
     """Check if inner bbox is inside outer bbox"""
     ix1, iy1, ix2, iy2 = inner
@@ -40,6 +64,64 @@ def point_in_polygon(point, polygon):
     x, y = point
     polygon = np.array(polygon, dtype=np.int32)
     return cv2.pointPolygonTest(polygon, (float(x), float(y)), False) >= 0
+
+
+def _upsert_plate_record(
+    db,
+    job_id: str,
+    plate_text: str,
+    track_id: int,
+    confidence: float,
+    bbox_confidence: float,
+    image,
+    vehicle_type,
+    vehicle_conf,
+    vehicle_crop,
+    frame_number: int,
+):
+    img_filename = f"{OUTPUT_DIR}/{job_id}_{plate_text}_track{track_id}.jpg"
+    cv2.imwrite(img_filename, image)
+
+    vehicle_img_path = None
+    if vehicle_crop is not None:
+        vehicle_img_path = f"{OUTPUT_DIR}/{job_id}_{plate_text}_track{track_id}_vehicle.jpg"
+        cv2.imwrite(vehicle_img_path, vehicle_crop)
+
+    plate_record = (
+        db.query(Plate)
+        .filter(
+            Plate.job_id == job_id,
+            Plate.track_id == track_id,
+            Plate.plate_text == plate_text,
+        )
+        .first()
+    )
+
+    if plate_record is None:
+        plate_record = Plate(
+            job_id=job_id,
+            plate_text=plate_text,
+            best_confidence=confidence,
+            bbox_confidence=bbox_confidence,
+            best_image_path=img_filename,
+            vehicle_type=vehicle_type,
+            vehicle_confidence=vehicle_conf,
+            vehicle_image_path=vehicle_img_path,
+            track_id=track_id,
+            frame_number=frame_number,
+            crossed_line=1,
+        )
+        db.add(plate_record)
+    elif (plate_record.best_confidence or 0.0) < confidence:
+        plate_record.best_confidence = confidence
+        plate_record.bbox_confidence = bbox_confidence
+        plate_record.best_image_path = img_filename
+        plate_record.vehicle_type = vehicle_type
+        plate_record.vehicle_confidence = vehicle_conf
+        plate_record.vehicle_image_path = vehicle_img_path
+        plate_record.frame_number = frame_number
+
+    db.commit()
 
 
 def run_pipeline_with_tracking(job_id: str, video_path: str, db):
@@ -70,13 +152,17 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
         except:
             print("[WARN] Invalid line coordinates")
     
-    cap = cv2.VideoCapture(video_path)
+    cap = _open_capture_with_retry(video_path)
     if not cap.isOpened():
         raise Exception("Error opening video file")
 
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if not fps or fps <= 0:
+        fps = 20.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if width <= 0 or height <= 0:
+        raise Exception("Invalid stream/video dimensions")
     
     # Create ROI mask if available
     roi_mask = None
@@ -86,6 +172,14 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
 
     print(f"[DEBUG] Video properties - FPS: {fps}, Width: {width}, Height: {height}")
     print(f"[DEBUG] ROI: {roi_polygon is not None}, Line: {line_counter is not None}")
+
+    detection_side = None
+    if line_counter:
+        reference_point = (width // 2, height - 1)
+        side = line_counter._compute_side(reference_point)
+        if side != 0:
+            detection_side = side
+            print(f"[DEBUG] Detection side set to {detection_side} using reference point {reference_point}")
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     output_video_path = f"{PROCESSED_DIR}/{job_id}_processed.mp4"
@@ -103,11 +197,32 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
     
     frame_count = 0
     crossed_track_ids = set()  # Track IDs that crossed the line
+    live_frame_path = os.path.join("media", "frames", f"{job_id}_live.jpg")
+    is_camera_stream = job.job_type == "camera_stream"
+    consecutive_read_failures = 0
 
     while True:
+        if is_camera_stream and frame_count > 0 and frame_count % 30 == 0:
+            db.refresh(job)
+            if job.is_live != "true" or job.status == "stopped":
+                print(f"[INFO] Camera job {job_id} received stop signal")
+                break
+            job.last_frame_processed_at = datetime.utcnow()
+            db.commit()
+
         ret, frame = cap.read()
         if not ret:
-            break
+            if not is_camera_stream:
+                break
+
+            consecutive_read_failures += 1
+            if consecutive_read_failures > 40:
+                print(f"[WARN] Camera stream stalled for job {job_id}, stopping stream processing")
+                break
+            time.sleep(0.05)
+            continue
+
+        consecutive_read_failures = 0
         
         frame_count += 1
         display_frame = frame.copy()
@@ -152,16 +267,19 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
             
             # Check line crossing
             crossed = False
+            current_side = None
             if line_counter and in_roi:
                 prev_centroid = tracker.get_previous_centroid(track_id)
                 crossed = line_counter.check_crossing(track_id, (cx, cy), prev_centroid)
                 if crossed:
                     crossed_track_ids.add(track_id)
+                current_side = line_counter._compute_side((cx, cy))
             
             # Only process vehicles that are in ROI (and crossed if line exists)
             should_process = in_roi
             if line_counter:
-                should_process = should_process and track_id in crossed_track_ids
+                on_detection_side = detection_side is not None and current_side == detection_side
+                should_process = should_process and (track_id in crossed_track_ids or on_detection_side)
             
             # Draw vehicle box
             color = (0, 255, 0) if should_process else (128, 128, 128)
@@ -217,41 +335,59 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
                             if DEBUG_OCR and conf < MIN_OCR_CONF:
                                 print(f"[DEBUG] Track {track_id} Frame {frame_count}: OCR too low - '{raw_text}' (conf={conf:.2f}, need {MIN_OCR_CONF})")
                             
-                            if conf >= MIN_OCR_CONF:
-                                # Normalize and validate plate format
-                                text = normalize_plate(raw_text)
-                                
-                                if text and is_valid_plate(text) and is_valid_plate(text):
-                                    display_text = text
-                                    
-                                    # Store plate info for this track
-                                    if track_id not in tracked_plates:
-                                        tracked_plates[track_id] = {}
-                                    
-                                    if text not in tracked_plates[track_id]:
-                                        tracked_plates[track_id][text] = []
-                                    
-                                    # Get vehicle type from original detection
-                                    vehicle_type = None
-                                    vehicle_conf = None
-                                    for v in vehicle_detections:
-                                        if is_inside([vx1, vy1, vx2, vy2], v["bbox"]):
-                                            vehicle_type = v["label"]
-                                            vehicle_conf = v["confidence"]
-                                            break
-                                    
-                                    tracked_plates[track_id][text].append({
-                                        "confidence": conf,
-                                        "bbox_confidence": det_conf,
-                                        "image": raw_crop,
-                                        "vehicle_type": vehicle_type,
-                                        "vehicle_conf": vehicle_conf,
-                                        "vehicle_crop": vehicle_crop.copy(),
-                                        "frame_number": frame_count,
-                                        "track_id": track_id
-                                    })
-                                elif DEBUG_OCR:
-                                    print(f"[DEBUG] Track {track_id} Frame {frame_count}: Invalid plate format - '{text}' (raw: '{raw_text}')")
+                            # Accept all OCR outputs (not only validated formats) once line-cross condition is met
+                            normalized_text = normalize_plate(raw_text)
+                            fallback_text = re.sub(r"[^A-Za-z0-9]", "", raw_text.upper())
+                            text = normalized_text if normalized_text else fallback_text
+
+                            if text:
+                                display_text = text
+
+                                # Store plate info for this track
+                                if track_id not in tracked_plates:
+                                    tracked_plates[track_id] = {}
+
+                                if text not in tracked_plates[track_id]:
+                                    tracked_plates[track_id][text] = []
+
+                                # Get vehicle type from original detection
+                                vehicle_type = None
+                                vehicle_conf = None
+                                for v in vehicle_detections:
+                                    if is_inside([vx1, vy1, vx2, vy2], v["bbox"]):
+                                        vehicle_type = v["label"]
+                                        vehicle_conf = v["confidence"]
+                                        break
+
+                                tracked_plates[track_id][text].append({
+                                    "confidence": conf,
+                                    "bbox_confidence": det_conf,
+                                    "image": raw_crop,
+                                    "vehicle_type": vehicle_type,
+                                    "vehicle_conf": vehicle_conf,
+                                    "vehicle_crop": vehicle_crop.copy(),
+                                    "frame_number": frame_count,
+                                    "track_id": track_id
+                                })
+
+                                _upsert_plate_record(
+                                    db=db,
+                                    job_id=job_id,
+                                    plate_text=text,
+                                    track_id=track_id,
+                                    confidence=conf,
+                                    bbox_confidence=det_conf,
+                                    image=raw_crop,
+                                    vehicle_type=vehicle_type,
+                                    vehicle_conf=vehicle_conf,
+                                    vehicle_crop=vehicle_crop.copy(),
+                                    frame_number=frame_count,
+                                )
+
+                                if DEBUG_OCR and not is_valid_plate(text):
+                                    print(f"[DEBUG] Track {track_id} Frame {frame_count}: Saved non-validated OCR '{text}' (raw: '{raw_text}', conf={conf:.2f})")
+                            elif DEBUG_OCR:
+                                print(f"[DEBUG] Track {track_id} Frame {frame_count}: OCR text empty after cleanup (raw: '{raw_text}')")
                         else:
                             if DEBUG_OCR:
                                 print(f"[DEBUG] Track {track_id} Frame {frame_count}: OCR returned no results")
@@ -264,6 +400,9 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
 
         out.write(display_frame)
+
+        if is_camera_stream and frame_count % 5 == 0:
+            cv2.imwrite(live_frame_path, display_frame)
 
     cap.release()
     out.release()
@@ -279,34 +418,19 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
             
             # Get best detection (highest OCR confidence)
             best = max(detections_list, key=lambda x: x["confidence"])
-            
-            # Save best plate image
-            img_filename = f"{OUTPUT_DIR}/{job_id}_{plate_text}_track{track_id}.jpg"
-            cv2.imwrite(img_filename, best["image"])
-            
-            # Save vehicle image if available
-            vehicle_img_path = None
-            if best["vehicle_crop"] is not None:
-                vehicle_img_path = f"{OUTPUT_DIR}/{job_id}_{plate_text}_track{track_id}_vehicle.jpg"
-                cv2.imwrite(vehicle_img_path, best["vehicle_crop"])
-            
-            # Add to database
-            new_plate = Plate(
+            _upsert_plate_record(
+                db=db,
                 job_id=job_id,
                 plate_text=plate_text,
-                best_confidence=best["confidence"],
-                bbox_confidence=best["bbox_confidence"],
-                best_image_path=img_filename,
-                vehicle_type=best["vehicle_type"],
-                vehicle_confidence=best["vehicle_conf"],
-                vehicle_image_path=vehicle_img_path,
                 track_id=track_id,
+                confidence=best["confidence"],
+                bbox_confidence=best["bbox_confidence"],
+                image=best["image"],
+                vehicle_type=best["vehicle_type"],
+                vehicle_conf=best["vehicle_conf"],
+                vehicle_crop=best["vehicle_crop"],
                 frame_number=best["frame_number"],
-                crossed_line=1  # Only saved if crossed
             )
-            db.add(new_plate)
-    
-    db.commit()
 
     # Convert to H.264 for browser compatibility
     final_output = f"{PROCESSED_DIR}/{job_id}_final.mp4"
@@ -327,6 +451,9 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db):
     except:
         print("[WARN] FFmpeg conversion failed, using original")
         job.processed_video_path = output_video_path
+
+    if is_camera_stream:
+        job.last_frame_processed_at = datetime.utcnow()
     
     db.commit()
     print(f"[INFO] Pipeline complete - saved {len(tracked_plates)} plates")
