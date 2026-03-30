@@ -51,30 +51,49 @@ def _open_capture_with_retry(source: str, retries: int = 5, retry_delay: float =
             "|threads;1"
         )
         params = [
-            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
-            cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000,
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8000,
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC, 8000,
         ]
     else:
         params = []
 
+    def _open(src, holder):
+        try:
+            if _is_rtsp_source(src):
+                c = cv2.VideoCapture(src, cv2.CAP_FFMPEG, params)
+            else:
+                c = cv2.VideoCapture(src)
+            c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            holder[0] = c
+        except Exception as exc:
+            print(f"[ERROR] VideoCapture open exception: {exc}")
+
     for attempt in range(retries):
-        if is_rtsp:
-            cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG, params)
-        else:
-            cap = cv2.VideoCapture(source)
+        cap_holder = [None]
+        t = threading.Thread(target=_open, args=(source, cap_holder), daemon=True, name="cap_open")
+        t.start()
+        t.join(timeout=10.0)
 
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        time.sleep(retry_delay)
+        if t.is_alive():
+            print(f"[WARN] VideoCapture open timed out on attempt {attempt + 1}/{retries}")
+            time.sleep(retry_delay)
+            continue
 
-        if cap.isOpened():
+        cap = cap_holder[0]
+
+        if cap is not None and cap.isOpened():
             for _ in range(3):
                 cap.grab()
             print(f"[INFO] Stream opened on attempt {attempt + 1}")
             return cap
 
-        cap.release()
-        print(f"[WARN] Capture open failed attempt {attempt + 1}/{retries}")
+        if cap is not None:
+            cap.release()
 
+        print(f"[WARN] Capture open failed attempt {attempt + 1}/{retries}")
+        time.sleep(retry_delay)
+
+    print(f"[ERROR] All {retries} reconnect attempts failed")
     return None
 
 
@@ -248,6 +267,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
     live_frame_path = os.path.join("media", "frames", f"{job_id}_live.jpg")
     is_camera_stream = job.job_type == "camera_stream"
     consecutive_read_failures = 0
+    consecutive_timeouts = 0
     expected_h, expected_w = None, None
 
     while True:
@@ -268,20 +288,32 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                 time.sleep(5.0)
                 continue
 
-        ret, frame, timed_out = _safe_cap_read(cap, timeout_sec=5.0)
+        ret, frame, timed_out = _safe_cap_read(cap, timeout_sec=10.0)
 
         if timed_out:
+            consecutive_timeouts += 1
+            if consecutive_timeouts < 2:
+                # Single blip - retry once before reconnecting
+                print(f"[WARN] Timeout #{consecutive_timeouts} for job {job_id}, retrying read...")
+                time.sleep(1.0)
+                continue
+
+            # 2 consecutive timeouts - do a real reconnect
             print(f"[WARN] Stream stalled for job {job_id}, reconnecting...")
+            consecutive_timeouts = 0
             old_cap = cap
+            cap = None              # set None first so loop top won't try to read dead cap
+            time.sleep(3.0)         # wait for _read daemon thread to fully exit before releasing
             old_cap.release()
-            time.sleep(1.5)
-            new_cap = _open_capture_with_retry(video_path, retries=5, retry_delay=1.0)
+            time.sleep(1.0)
+            new_cap = _open_capture_with_retry(video_path, retries=3, retry_delay=2.0)
             cap = new_cap
             if cap is None or not cap.isOpened():
                 if not is_camera_stream:
                     break
-                print(f"[ERROR] Reconnect failed for job {job_id}, retrying in 5s...")
-                time.sleep(5.0)
+                print(f"[WARN] Reconnect failed for job {job_id}, will retry via loop...")
+            else:
+                print(f"[INFO] Reconnected successfully for job {job_id}")
             consecutive_read_failures = 0
             continue
 
@@ -316,6 +348,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
             continue
 
         consecutive_read_failures = 0
+        consecutive_timeouts = 0
         
         frame_count += 1
         display_frame = frame.copy()
