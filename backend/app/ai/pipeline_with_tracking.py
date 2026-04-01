@@ -260,6 +260,17 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
     
     # Track which vehicles have had plates detected
     tracked_plates = {}  # {track_id: {plate_text: data}}
+
+    track_id_remap = {}   # {raw_track_id: sequential_1based_id}
+    next_display_id = [1]
+
+    def _get_display_id(raw_id: int) -> int:
+        if raw_id not in track_id_remap:
+            track_id_remap[raw_id] = next_display_id[0]
+            next_display_id[0] += 1
+        return track_id_remap[raw_id]
+    
+    
     grouped = defaultdict(list)
     
     frame_count = 0
@@ -415,8 +426,9 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
             cv2.rectangle(display_frame, (vx1, vy1), (vx2, vy2), color, thickness)
             cv2.circle(display_frame, (cx, cy), 5, color, -1)
             
-            # Draw track ID
-            cv2.putText(display_frame, f"ID:{track_id}", (vx1, max(vy1 - 10, 0)),
+            # Do not allocate remapped IDs here; only plated vehicles should consume IDs.
+            label_id = track_id_remap.get(track_id, track_id)
+            cv2.putText(display_frame, f"ID:{label_id}", (vx1, max(vy1 - 10, 0)),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             
             # Crossing highlight
@@ -470,13 +482,14 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
 
                             if text:
                                 display_text = text
+                                display_id = _get_display_id(track_id)
 
                                 # Store plate info for this track
-                                if track_id not in tracked_plates:
-                                    tracked_plates[track_id] = {}
+                                if display_id not in tracked_plates:
+                                    tracked_plates[display_id] = {}
 
-                                if text not in tracked_plates[track_id]:
-                                    tracked_plates[track_id][text] = []
+                                if text not in tracked_plates[display_id]:
+                                    tracked_plates[display_id][text] = []
 
                                 # Get vehicle type from original detection
                                 vehicle_type = None
@@ -487,7 +500,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                                         vehicle_conf = v["confidence"]
                                         break
 
-                                tracked_plates[track_id][text].append({
+                                tracked_plates[display_id][text].append({
                                     "confidence": conf,
                                     "bbox_confidence": det_conf,
                                     "image": raw_crop,
@@ -495,14 +508,14 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                                     "vehicle_conf": vehicle_conf,
                                     "vehicle_crop": vehicle_crop.copy(),
                                     "frame_number": frame_count,
-                                    "track_id": track_id
+                                    "track_id": display_id
                                 })
 
                                 _upsert_plate_record(
                                     db=db,
                                     job_id=job_id,
                                     plate_text=text,
-                                    track_id=track_id,
+                                    track_id=display_id,
                                     confidence=conf,
                                     bbox_confidence=det_conf,
                                     image=raw_crop,
