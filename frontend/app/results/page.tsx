@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Camera, LayoutDashboard, Moon, Sun, History, Play } from "lucide-react";
+import { Camera, LayoutDashboard, Moon, Sun, History, Play, Download } from "lucide-react";
 import { getAllJobs, getJobResults } from "@/lib/api";
+import { exportResultsToExcel } from "@/lib/exportExcel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,6 +126,7 @@ export default function ResultsPage() {
   const getStatusBadgeVariant = (status: string) => {
     if (status === "completed") return "default" as const;
     if (status === "failed") return "destructive" as const;
+    if (status === "stopped") return "outline" as const;
     return "secondary" as const;
   };
 
@@ -272,7 +274,7 @@ export default function ResultsPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                disabled={job.status !== "completed"}
+                                disabled={job.status !== "completed" && job.status !== "stopped"}
                                 onClick={() => loadJobResults(job.job_id)}
                               >
                                 <Play className="h-4 w-4 mr-2" />
@@ -301,39 +303,64 @@ export default function ResultsPage() {
                         </div>
                       </CardContent>
                     </Card>
-                  ) : jobResults && jobResults.processed_video ? (
+                  ) : jobResults ? (
                     <>
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Processed Video</CardTitle>
-                          <CardDescription>
-                            Job ID: {selectedJob}
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <video
-                            src={`http://localhost:8000/${jobResults.processed_video}`}
-                            controls
-                            className="w-full rounded-lg border"
-                            preload="metadata"
-                          >
-                            Your browser does not support the video tag.
-                          </video>
-                        </CardContent>
-                      </Card>
+                      {jobResults.processed_video && (
+                        <>
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Processed Video</CardTitle>
+                              <CardDescription>
+                                Job ID: {selectedJob}
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              <video
+                                src={`http://localhost:8000/${jobResults.processed_video}`}
+                                controls
+                                className="w-full rounded-lg border"
+                                preload="metadata"
+                              >
+                                Your browser does not support the video tag.
+                              </video>
+                            </CardContent>
+                          </Card>
 
-                      <Separator />
+                          <Separator />
+                        </>
+                      )}
 
                       <Card>
                         <CardHeader>
                           <CardTitle>Detected Plates</CardTitle>
                           <CardDescription>
                             Best-confidence image and OCR text grouped by plate string.
+                            {jobResults.status === "stopped" && (
+                              <span className="ml-2 text-yellow-600 font-medium">
+                                (Stream was stopped - showing partial results)
+                              </span>
+                            )}
                           </CardDescription>
-                          <CardAction>
+                          <CardAction className="flex items-center gap-2">
                             <Badge variant="secondary">
                               {dedupedJobPlates.length} result(s)
                             </Badge>
+                            {dedupedJobPlates.length > 0 && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  exportResultsToExcel(
+                                    dedupedJobPlates,
+                                    selectedJob!,
+                                    jobResults.status
+                                  )
+                                }
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Export to Excel
+                              </Button>
+                            )}
                           </CardAction>
                         </CardHeader>
                         <CardContent>

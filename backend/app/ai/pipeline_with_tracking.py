@@ -220,7 +220,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
             print("[WARN] Invalid line coordinates")
     
     cap = _open_capture_with_retry(video_path)
-    if not cap.isOpened():
+    if cap is None or not cap.isOpened():
         raise Exception("Error opening video file")
 
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -271,10 +271,12 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
     expected_h, expected_w = None, None
 
     while True:
-        if is_camera_stream and frame_count > 0 and frame_count % 30 == 0:
-            db.refresh(job)
-            if job.is_live != "true" or job.status == "stopped":
-                print(f"[INFO] Camera job {job_id} received stop signal")
+        if is_camera_stream and frame_count > 0 and frame_count % 5 == 0:
+            db.expire_all()   # force SQLAlchemy to re-read from DB, not cache
+            fresh_job = db.query(Job).filter(Job.job_id == job_id).first()
+            if fresh_job is None or fresh_job.is_live != "true" or fresh_job.status == "stopped":
+                print(f"[INFO] Camera job {job_id} received stop signal at frame {frame_count}")
+                job = fresh_job  # update local reference so cleanup below works
                 break
             job.last_frame_processed_at = datetime.utcnow()
             db.commit()
@@ -536,19 +538,18 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
         if is_camera_stream and frame_count % 5 == 0:
             cv2.imwrite(live_frame_path, display_frame)
 
-    cap.release()
+    if cap is not None:
+        cap.release()
     out.release()
 
-    print(f"[DEBUG] Tracked {len(tracked_plates)} vehicles with plates")
-    print(f"[DEBUG] Total crossed: {len(crossed_track_ids)}")
+    print(f"[DEBUG] Pipeline loop ended. Tracked={len(tracked_plates)}, Crossed={len(crossed_track_ids)}")
 
-    # Save only the best detection for each unique plate per track
+    # Flush best detection per plate per track to DB
+    saved_count = 0
     for track_id, plates_dict in tracked_plates.items():
         for plate_text, detections_list in plates_dict.items():
             if not detections_list:
                 continue
-            
-            # Get best detection (highest OCR confidence)
             best = max(detections_list, key=lambda x: x["confidence"])
             _upsert_plate_record(
                 db=db,
@@ -563,29 +564,47 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                 vehicle_crop=best["vehicle_crop"],
                 frame_number=best["frame_number"],
             )
+            saved_count += 1
 
-    # Convert to H.264 for browser compatibility
-    final_output = f"{PROCESSED_DIR}/{job_id}_final.mp4"
-    try:
-        subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-i", output_video_path,
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "23",
-                final_output
-            ],
-            check=True,
-            capture_output=True
-        )
-        job.processed_video_path = final_output
-    except:
-        print("[WARN] FFmpeg conversion failed, using original")
-        job.processed_video_path = output_video_path
+    print(f"[INFO] Flushed {saved_count} plate records to DB")
 
-    if is_camera_stream:
-        job.last_frame_processed_at = datetime.utcnow()
-    
+    # FFmpeg conversion (skip for stopped camera streams - too slow)
+    db.expire_all()
+    current_job = db.query(Job).filter(Job.job_id == job_id).first()
+    is_stopped = current_job and current_job.status == "stopped"
+
+    if not is_stopped:
+        final_output = f"{PROCESSED_DIR}/{job_id}_final.mp4"
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    output_video_path,
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    final_output,
+                ],
+                check=True,
+                capture_output=True,
+            )
+            if current_job:
+                current_job.processed_video_path = final_output
+        except Exception:
+            print("[WARN] FFmpeg conversion failed, using original")
+            if current_job:
+                current_job.processed_video_path = output_video_path
+    else:
+        print("[INFO] Job was stopped - skipping FFmpeg conversion")
+
+    if current_job:
+        current_job.is_live = "false"
+        current_job.last_frame_processed_at = datetime.utcnow()
+
     db.commit()
-    print(f"[INFO] Pipeline complete - saved {len(tracked_plates)} plates")
+    print(f"[INFO] Pipeline complete - {saved_count} plates saved, status={current_job.status if current_job else 'unknown'}")

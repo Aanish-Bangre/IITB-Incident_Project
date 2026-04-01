@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import asyncio
+import time as _time
 import queue
 import threading
 from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
@@ -361,6 +362,8 @@ def stop_camera_job(job_id: str, db: Session = Depends(get_db)):
         job.status = "stopped"
     db.commit()
     active_frame_queues.pop(job_id, None)
+
+    _time.sleep(1.5)
 
     plates = db.query(Plate).filter(Plate.job_id == job_id).all()
 
