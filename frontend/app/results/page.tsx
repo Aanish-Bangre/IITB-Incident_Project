@@ -59,7 +59,9 @@ interface Plate {
   vehicle_confidence?: number;
   vehicle_image_path?: string;
   track_id?: number;
+  speed_kmh?: number;
   frame_number?: number;
+  detected_at?: string;
 }
 
 interface JobResults {
@@ -380,6 +382,7 @@ export default function ResultsPage() {
                                   <TableHead>Plate Text</TableHead>
                                   <TableHead>Vehicle Type</TableHead>
                                   <TableHead>Track ID</TableHead>
+                                  <TableHead>Detected At</TableHead>
                                   <TableHead className="text-right">BBox Confidence</TableHead>
                                   <TableHead className="text-right">OCR Confidence</TableHead>
                                   <TableHead className="text-right">Vehicle Confidence</TableHead>
@@ -421,6 +424,11 @@ export default function ResultsPage() {
                                         <Badge variant="outline">#{plate.track_id}</Badge>
                                       ) : (
                                         <span className="text-muted-foreground text-sm">-</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {plate.detected_at ?? (
+                                        <span className="text-muted-foreground text-sm">N/A</span>
                                       )}
                                     </TableCell>
                                     <TableCell className="text-right font-medium">

@@ -44,6 +44,8 @@ class Plate(Base):
     frame_number = Column(Integer, nullable=True)  # Frame when detected
     crossed_line = Column(Integer, default=1)  # 1 if crossed line (filtered)
     speed_kmh = Column(Float, nullable=True)
+    detected_at = Column(DateTime(timezone=True), nullable=True) 
+
 
 
 

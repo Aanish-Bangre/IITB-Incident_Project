@@ -241,7 +241,8 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
                 "vehicle_image_path": plate.vehicle_image_path,
                 "track_id": plate.track_id,
                 "frame_number": plate.frame_number,
-                "speed_kmh": plate.speed_kmh
+                "speed_kmh": plate.speed_kmh,
+                "detected_at": plate.detected_at.strftime("%d-%m-%Y %H:%M:%S") if plate.detected_at else None,
             }
             for plate in plates
         ]

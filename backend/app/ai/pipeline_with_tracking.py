@@ -145,6 +145,7 @@ def _upsert_plate_record(
     vehicle_conf,
     vehicle_crop,
     frame_number: int,
+    detected_at=None,          
 ):
     img_filename = f"{OUTPUT_DIR}/{job_id}_{plate_text}_track{track_id}.jpg"
     cv2.imwrite(img_filename, image)
@@ -177,6 +178,7 @@ def _upsert_plate_record(
             track_id=track_id,
             frame_number=frame_number,
             crossed_line=1,
+            detected_at=detected_at,
         )
         db.add(plate_record)
     elif (plate_record.best_confidence or 0.0) < confidence:
@@ -508,7 +510,8 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                                     "vehicle_conf": vehicle_conf,
                                     "vehicle_crop": vehicle_crop.copy(),
                                     "frame_number": frame_count,
-                                    "track_id": display_id
+                                    "track_id": display_id,
+                                    "detected_at": datetime.now(),
                                 })
 
                                 _upsert_plate_record(
@@ -523,6 +526,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                                     vehicle_conf=vehicle_conf,
                                     vehicle_crop=vehicle_crop.copy(),
                                     frame_number=frame_count,
+                                    detected_at=datetime.now(),
                                 )
 
                                 if DEBUG_OCR and not is_valid_plate(text):
@@ -576,6 +580,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                 vehicle_conf=best["vehicle_conf"],
                 vehicle_crop=best["vehicle_crop"],
                 frame_number=best["frame_number"],
+                detected_at=best.get("detected_at"),  
             )
             saved_count += 1
 

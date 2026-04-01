@@ -9,7 +9,9 @@ interface Plate {
   vehicle_confidence?: number;
   vehicle_image_path?: string;
   track_id?: number;
+  speed_kmh?: number;
   frame_number?: number;
+  detected_at?: string;
 }
 
 export function exportResultsToExcel(
@@ -32,6 +34,7 @@ export function exportResultsToExcel(
       ? (plate.vehicle_confidence * 100).toFixed(2)
       : "N/A",
     "Frame Number": plate.frame_number ?? "N/A",
+    "Detected At": plate.detected_at ?? "N/A",
     "Plate Image Path": plate.image_path ?? "",
     "Vehicle Image Path": plate.vehicle_image_path ?? "",
   }));
@@ -47,6 +50,7 @@ export function exportResultsToExcel(
     { wch: 22 },
     { wch: 24 },
     { wch: 14 },
+    { wch: 22 },
     { wch: 40 },
     { wch: 40 },
   ];
