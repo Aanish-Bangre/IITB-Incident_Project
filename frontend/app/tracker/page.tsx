@@ -19,14 +19,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import ROILineSelector from "@/components/ROILineSelector";
 import {
   Sidebar,
@@ -42,22 +34,11 @@ import {
   SidebarProvider,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { PlatesTable, type Plate } from "@/components/PlatesTable";
 
 interface Point {
   x: number;
   y: number;
-}
-
-interface Plate {
-  plate_text: string;
-  confidence: number;
-  bbox_confidence: number;
-  image_path: string;
-  vehicle_type?: string;
-  vehicle_confidence?: number;
-  vehicle_image_path?: string;
-  track_id?: number;
-  frame_number?: number;
 }
 
 type JobStatus = "idle" | "uploading" | "uploaded" | "pending" | "processing" | "completed" | "failed" | "stopped";
@@ -352,16 +333,6 @@ export default function HomePage() {
 
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
-  const dedupedPlates = Object.values(
-    plates.reduce((acc, plate) => {
-      const key = plate.track_id ?? `no-id-${plate.plate_text}`;
-      if (!acc[key] || (plate.confidence ?? 0) > (acc[key].confidence ?? 0)) {
-        acc[key] = plate;
-      }
-      return acc;
-    }, {} as Record<string | number, Plate>)
-  );
-
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
@@ -562,48 +533,13 @@ export default function HomePage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Vehicle Crop</TableHead>
-                        <TableHead>Plate Crop</TableHead>
-                        <TableHead>Plate Text</TableHead>
-                        <TableHead>Vehicle Type</TableHead>
-                        <TableHead>Track ID</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {dedupedPlates.map((plate, idx) => (
-                        <TableRow key={`${plate.track_id}-${idx}`}>
-                          <TableCell>
-                            {plate.vehicle_image_path ? (
-                              <img
-                                src={`${API.defaults.baseURL}/${plate.vehicle_image_path}`}
-                                alt={`Vehicle ${plate.track_id ?? ""}`}
-                                className="h-10 w-24 rounded border object-cover"
-                              />
-                            ) : (
-                              "-"
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {plate.image_path ? (
-                              <img
-                                src={`${API.defaults.baseURL}/${plate.image_path}`}
-                                alt={`Plate ${plate.plate_text}`}
-                                className="h-10 w-24 rounded border object-cover"
-                              />
-                            ) : (
-                              "-"
-                            )}
-                          </TableCell>
-                          <TableCell className="font-medium">{plate.plate_text || "-"}</TableCell>
-                          <TableCell>{plate.vehicle_type ?? "-"}</TableCell>
-                          <TableCell>{plate.track_id ?? "-"}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  <PlatesTable
+                    plates={plates}
+                    baseUrl={API.defaults.baseURL ?? "http://localhost:8000"}
+                    jobId={jobId ?? "camera-stream"}
+                    jobStatus={status}
+                    showExport={status === "stopped" || status === "completed"}
+                  />
                 </CardContent>
               </Card>
             )}

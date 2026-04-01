@@ -21,14 +21,6 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -42,22 +34,11 @@ import {
   SidebarProvider,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { PlatesTable, type Plate } from "@/components/PlatesTable";
 
 interface Point {
   x: number;
   y: number;
-}
-
-interface Plate {
-  plate_text: string;
-  confidence: number;
-  bbox_confidence: number;
-  image_path: string;
-  vehicle_type?: string;
-  vehicle_confidence?: number;
-  vehicle_image_path?: string;
-  track_id?: number;
-  frame_number?: number;
 }
 
 type JobStatus = "idle" | "uploading" | "uploaded" | "pending" | "processing" | "completed" | "failed";
@@ -95,16 +76,6 @@ export default function Home() {
   }, [status]);
 
   const statusLabel = useMemo(() => status.charAt(0).toUpperCase() + status.slice(1), [status]);
-
-  const dedupedPlates = Object.values(
-    plates.reduce((acc, plate) => {
-      const key = plate.track_id ?? `no-id-${plate.plate_text}`;
-      if (!acc[key] || (plate.confidence ?? 0) > (acc[key].confidence ?? 0)) {
-        acc[key] = plate;
-      }
-      return acc;
-    }, {} as Record<string | number, Plate>)
-  );
 
   useEffect(() => {
     const stored = localStorage.getItem("theme") as "light" | "dark" | null;
@@ -454,11 +425,8 @@ export default function Home() {
                   <CardHeader>
                     <CardTitle>Detected Plates</CardTitle>
                     <CardDescription>
-                      Best-confidence image and OCR text grouped by plate string.
+                      Best-confidence result grouped by Track ID.
                     </CardDescription>
-                    <CardAction>
-                        <Badge variant="secondary">{dedupedPlates.length} result(s)</Badge>
-                    </CardAction>
                   </CardHeader>
                   <CardContent>
                     {isFetchingResults ? (
@@ -467,83 +435,14 @@ export default function Home() {
                         <Skeleton className="h-10 w-full" />
                         <Skeleton className="h-10 w-full" />
                       </div>
-                    ) : null}
-
-                    {!isFetchingResults && status === "completed" && plates.length === 0 ? (
-                      <Alert>
-                        <AlertTitle>No plates found</AlertTitle>
-                        <AlertDescription>
-                          Processing finished but no valid plates were detected with current thresholds.
-                        </AlertDescription>
-                      </Alert>
-                    ) : null}
-
-                    {!isFetchingResults && plates.length > 0 ? (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Vehicle Crop</TableHead>
-                            <TableHead>Plate Crop</TableHead>
-                            <TableHead>Plate Text</TableHead>
-                            <TableHead>Vehicle Type</TableHead>
-                            <TableHead>Track ID</TableHead>
-                            <TableHead className="text-right">BBox Confidence</TableHead>
-                            <TableHead className="text-right">OCR Confidence</TableHead>
-                            <TableHead className="text-right">Vehicle Confidence</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {dedupedPlates.map((plate, index) => (
-                            <TableRow key={`${plate.track_id ?? plate.plate_text}-${index}`}>
-                              <TableCell>
-                                {plate.vehicle_image_path ? (
-                                  <img
-                                    src={`http://localhost:8000/${plate.vehicle_image_path}`}
-                                    alt={`Vehicle ${plate.vehicle_type}`}
-                                    className="h-20 rounded-md border"
-                                  />
-                                ) : (
-                                  <span className="text-muted-foreground text-sm">N/A</span>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <img
-                                  src={`http://localhost:8000/${plate.image_path}`}
-                                  alt={`Detected plate ${plate.plate_text}`}
-                                  className="h-16 rounded-md border"
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline">{plate.plate_text}</Badge>
-                              </TableCell>
-                              <TableCell>
-                                {plate.vehicle_type ? (
-                                  <Badge variant="secondary">{plate.vehicle_type}</Badge>
-                                ) : (
-                                  <span className="text-muted-foreground text-sm">N/A</span>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                {plate.track_id !== undefined ? (
-                                  <Badge variant="outline">#{plate.track_id}</Badge>
-                                ) : (
-                                  <span className="text-muted-foreground text-sm">-</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right font-medium">                            {(plate.bbox_confidence * 100).toFixed(2)}%
-                              </TableCell>
-                              <TableCell className="text-right font-medium">                              {(plate.confidence * 100).toFixed(2)}%
-                              </TableCell>
-                              <TableCell className="text-right font-medium">
-                                {plate.vehicle_confidence
-                                  ? `${(plate.vehicle_confidence * 100).toFixed(2)}%`
-                                  : 'N/A'}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    ) : null}
+                    ) : (
+                      <PlatesTable
+                        plates={plates}
+                        jobId={jobId ?? "video-upload"}
+                        jobStatus={status}
+                        showExport={status === "completed" && plates.length > 0}
+                      />
+                    )}
                   </CardContent>
                 </Card>
               )}
