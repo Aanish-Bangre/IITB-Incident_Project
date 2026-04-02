@@ -8,37 +8,25 @@ export function exportResultsToExcel(
   jobId: string,
   jobStatus: string
 ) {
-  const rows = plates.map((plate, index) => ({
-    "#":              index + 1,
-    "Track ID":       plate.track_id ?? "N/A",        // ← matches table col 1
-    "Plate Text":     plate.plate_text,               // ← col 4
-    "Vehicle Type":   plate.vehicle_type ?? "N/A",    // ← col 5
-    "Detected At":    plate.detected_at ?? "N/A",     // ← col 6
-    // Extra data (not in table but useful in Excel)
-    "OCR Confidence (%)": plate.confidence != null
-      ? (plate.confidence * 100).toFixed(2) : "N/A",
-    "BBox Confidence (%)": plate.bbox_confidence != null
-      ? (plate.bbox_confidence * 100).toFixed(2) : "N/A",
-    "Vehicle Confidence (%)": plate.vehicle_confidence != null
-      ? (plate.vehicle_confidence * 100).toFixed(2) : "N/A",
-    "Frame Number":   plate.frame_number ?? "N/A",
-    "Plate Image Path":   plate.image_path ?? "",
-    "Vehicle Image Path": plate.vehicle_image_path ?? "",
+  const rows = plates.map((plate) => ({
+    "Track ID": plate.track_id ?? "N/A",
+    "Vehicle Crop Path": plate.vehicle_image_path ?? "N/A",
+    "Plate Crop Path": plate.image_path ?? "N/A",
+    "Plate Text": plate.plate_text,
+    "Vehicle Type": plate.vehicle_type ?? "N/A",
+    "Speed (km/h)": plate.speed_kmh ?? "N/A",
+    "Detected At": plate.detected_at ?? "N/A",
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);
   ws["!cols"] = [
-    { wch: 5 },   // #
-    { wch: 10 },  // Track ID
+    { wch: 12 },  // Track ID
+    { wch: 45 },  // Vehicle Crop Path
+    { wch: 45 },  // Plate Crop Path
     { wch: 18 },  // Plate Text
-    { wch: 14 },  // Vehicle Type
+    { wch: 16 },  // Vehicle Type
+    { wch: 14 },  // Speed (km/h)
     { wch: 22 },  // Detected At
-    { wch: 20 },  // OCR Confidence
-    { wch: 22 },  // BBox Confidence
-    { wch: 24 },  // Vehicle Confidence
-    { wch: 14 },  // Frame Number
-    { wch: 40 },  // Plate Image Path
-    { wch: 40 },  // Vehicle Image Path
   ];
 
   const metaRows = [

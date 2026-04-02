@@ -21,7 +21,7 @@ export interface Plate {
   vehicle_image_path?: string;
   track_id?: number;
   frame_number?: number;
-  speed_kmh?: number;
+  speed_kmh?: number | null;
   detected_at?: string;
 }
 
@@ -92,6 +92,7 @@ export function PlatesTable({
             <TableHead>Plate Crop</TableHead>
             <TableHead>Plate Text</TableHead>
             <TableHead>Vehicle Type</TableHead>
+            <TableHead>Speed</TableHead>
             <TableHead>Detected At</TableHead>
           </TableRow>
         </TableHeader>
@@ -144,6 +145,16 @@ export function PlatesTable({
               <TableCell>
                 {plate.vehicle_type ? (
                   <Badge variant="secondary">{plate.vehicle_type}</Badge>
+                ) : (
+                  <span className="text-muted-foreground text-sm">N/A</span>
+                )}
+              </TableCell>
+
+              <TableCell>
+                {plate.speed_kmh != null ? (
+                  <Badge variant="outline" className="font-mono">
+                    {plate.speed_kmh} km/h
+                  </Badge>
                 ) : (
                   <span className="text-muted-foreground text-sm">N/A</span>
                 )}
