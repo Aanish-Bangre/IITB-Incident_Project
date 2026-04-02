@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Camera, LayoutDashboard, Moon, Sun, History, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { getAllJobs, getJobResults } from "@/lib/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -24,21 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-} from "@/components/ui/sidebar";
 import { PlatesTable, type Plate } from "@/components/PlatesTable";
+import AppShell from "@/components/AppShell";
 
 interface Job {
   job_id: string;
@@ -59,20 +46,11 @@ interface JobResults {
 }
 
 export default function ResultsPage() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJob, setSelectedJob] = useState<string | null>(null);
   const [jobResults, setJobResults] = useState<JobResults | null>(null);
   const [isLoadingJobs, setIsLoadingJobs] = useState(true);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("theme") as "light" | "dark" | null;
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const resolved = stored === "dark" || stored === "light" ? stored : (prefersDark ? "dark" : "light");
-    setTheme(resolved);
-  }, []);
 
   useEffect(() => {
     loadJobs();
@@ -104,13 +82,6 @@ export default function ResultsPage() {
     }
   };
 
-  const toggleTheme = () => {
-    const nextTheme = theme === "dark" ? "light" : "dark";
-    setTheme(nextTheme);
-    document.documentElement.classList.toggle("dark", nextTheme === "dark");
-    window.localStorage.setItem("theme", nextTheme);
-  };
-
   const getStatusBadgeVariant = (status: string) => {
     if (status === "completed") return "default" as const;
     if (status === "failed") return "destructive" as const;
@@ -119,80 +90,10 @@ export default function ResultsPage() {
   };
 
   return (
-    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
-      <Sidebar
-        collapsible="icon"
-        onMouseEnter={() => setSidebarOpen(true)}
-        onMouseLeave={() => setSidebarOpen(false)}
-      >
-        <SidebarHeader className="p-2">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton tooltip="ANPR" asChild>
-                <a href="/">
-                  <Camera />
-                  <span>ANPR</span>
-                </a>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
+    <AppShell activeRoute="/results">
+      <h1 className="mx-auto mb-4 w-full max-w-6xl text-2xl font-bold">All Jobs & Results</h1>
 
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Dashboard" asChild>
-                    <a href="/">
-                      <LayoutDashboard />
-                      <span>Dashboard</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Results" asChild isActive>
-                    <a href="/results">
-                      <History />
-                      <span>Results</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Tracker" asChild>
-                    <a href="/tracker">
-                      <Camera />
-                      <span>Tracker</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-        <SidebarRail />
-      </Sidebar>
-
-      <SidebarInset>
-        <main className="min-h-screen bg-muted/30 px-4 py-8 md:px-8">
-          <div className="mx-auto mb-4 flex w-full max-w-6xl items-center justify-between">
-            <h1 className="text-2xl font-bold">All Jobs & Results</h1>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={toggleTheme}
-              className="rounded-full"
-            >
-              {theme === "dark" ? (
-                <Sun className="h-5 w-5" />
-              ) : (
-                <Moon className="h-5 w-5" />
-              )}
-            </Button>
-          </div>
-
-          <Card className="mx-auto w-full max-w-6xl">
+      <Card className="mx-auto w-full max-w-6xl">
             <CardContent className="p-6 space-y-6">
               {/* Jobs List */}
               <Card>
@@ -332,9 +233,7 @@ export default function ResultsPage() {
                 </>
               )}
             </CardContent>
-          </Card>
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+      </Card>
+    </AppShell>
   );
 }

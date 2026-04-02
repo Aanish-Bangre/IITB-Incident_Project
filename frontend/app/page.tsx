@@ -1,7 +1,6 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { Camera, LayoutDashboard, Moon, Sun, History } from "lucide-react";
 import API, { uploadVideo, getFirstFrame, setROILine, getJobStatus, getJobResults } from "@/lib/api";
 import ROILineSelector from "@/components/ROILineSelector";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -20,20 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-} from "@/components/ui/sidebar";
+import AppShell from "@/components/AppShell";
 import { PlatesTable, type Plate } from "@/components/PlatesTable";
 
 interface Point {
@@ -54,11 +40,9 @@ const STATUS_PROGRESS: Record<JobStatus, number> = {
 };
 
 export default function Home() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<JobStatus>("idle");
-  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [plates, setPlates] = useState<Plate[]>([]);
   const [processedVideoPath, setProcessedVideoPath] = useState<string | null>(null);
   const [message, setMessage] = useState("Upload a video to begin ANPR processing.");
@@ -76,13 +60,6 @@ export default function Home() {
   }, [status]);
 
   const statusLabel = useMemo(() => status.charAt(0).toUpperCase() + status.slice(1), [status]);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("theme") as "light" | "dark" | null;
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const resolved = stored === "dark" || stored === "light" ? stored : (prefersDark ? "dark" : "light");
-    setTheme(resolved); // Only sync React state — layout script already set the DOM class
-  }, []);
 
   useEffect(() => {
     setProgress((current) => {
@@ -214,13 +191,6 @@ export default function Home() {
     }
   };
 
-  const toggleTheme = () => {
-    const nextTheme = theme === "dark" ? "light" : "dark";
-    setTheme(nextTheme);
-    document.documentElement.classList.toggle("dark", nextTheme === "dark");
-    window.localStorage.setItem("theme", nextTheme);
-  };
-
   useEffect(() => {
     if (!jobId || status === "uploaded" || showROISelector) return;
 
@@ -259,88 +229,20 @@ export default function Home() {
   }, [jobId, status, showROISelector]);
 
   return (
-    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
-      <Sidebar
-        collapsible="icon"
-        onMouseEnter={() => setSidebarOpen(true)}
-        onMouseLeave={() => setSidebarOpen(false)}
-      >
-        <SidebarHeader className="p-2">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton tooltip="ANPR" asChild>
-                <a href="/">
-                  <Camera />
-                  <span>ANPR</span>
-                </a>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
+    <AppShell activeRoute="/">
+      <Card className="mx-auto w-full max-w-6xl">
+        <CardHeader>
+          <CardTitle className="text-2xl md:text-3xl">Offline ANPR Dashboard</CardTitle>
+          <CardDescription>
+            Upload a road video and extract the most confident license plate predictions.
+          </CardDescription>
+          <CardAction className="flex items-center gap-2">
+            <Badge variant={statusBadgeVariant}>{statusLabel}</Badge>
+            {jobId ? <Badge variant="outline">Job {jobId.slice(0, 8)}</Badge> : null}
+          </CardAction>
+        </CardHeader>
 
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Dashboard" asChild isActive>
-                    <a href="/">
-                      <LayoutDashboard />
-                      <span>Dashboard</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Results" asChild>
-                    <a href="/results">
-                      <History />
-                      <span>Results</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Tracker" asChild>
-                    <a href="/tracker">
-                      <Camera />
-                      <span>Tracker</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-        <SidebarRail />
-      </Sidebar>
-
-      <SidebarInset>
-        <main className="min-h-screen bg-muted/30 px-4 py-8 md:px-8">
-          <div className="mx-auto mb-4 flex w-full max-w-6xl items-center justify-end">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={toggleTheme}
-              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              title={theme === "dark" ? "White Mode" : "Dark Mode"}
-            >
-              {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-            </Button>
-          </div>
-
-          <Card className="mx-auto w-full max-w-6xl">
-            <CardHeader>
-              <CardTitle className="text-2xl md:text-3xl">Offline ANPR Dashboard</CardTitle>
-              <CardDescription>
-                Upload a road video and extract the most confident license plate predictions.
-              </CardDescription>
-              <CardAction className="flex items-center gap-2">
-                <Badge variant={statusBadgeVariant}>{statusLabel}</Badge>
-                {jobId ? <Badge variant="outline">Job {jobId.slice(0, 8)}</Badge> : null}
-              </CardAction>
-            </CardHeader>
-
-            <CardContent className="space-y-6">
+        <CardContent className="space-y-6">
               {/* ROI/Line Selector */}
               {showROISelector && firstFrameUrl && jobId && (
                 <ROILineSelector
@@ -446,10 +348,8 @@ export default function Home() {
                   </CardContent>
                 </Card>
               )}
-            </CardContent>
-          </Card>
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+        </CardContent>
+      </Card>
+    </AppShell>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Camera, History, LayoutDashboard, Moon, Sun } from "lucide-react";
+import { Camera } from "lucide-react";
 import {
   default as API,
   getJobStatus,
@@ -20,21 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import ROILineSelector from "@/components/ROILineSelector";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-} from "@/components/ui/sidebar";
 import { PlatesTable, type Plate } from "@/components/PlatesTable";
+import AppShell from "@/components/AppShell";
 
 interface Point {
   x: number;
@@ -62,8 +49,6 @@ const getCameraLiveWsUrl = (jobId: string) => {
 };
 
 export default function HomePage() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<JobStatus>("idle");
   const [plates, setPlates] = useState<Plate[]>([]);
@@ -82,13 +67,6 @@ export default function HomePage() {
   const [cameraPassword, setCameraPassword] = useState("gpatil@2026");
   const [cameraIp, setCameraIp] = useState("10.162.1.182");
   const [cameraPath, setCameraPath] = useState("/h264");
-
-  useEffect(() => {
-    const stored = localStorage.getItem("theme") as "light" | "dark" | null;
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const resolved = stored === "dark" || stored === "light" ? stored : (prefersDark ? "dark" : "light");
-    setTheme(resolved);
-  }, []);
 
   useEffect(() => {
     setProgress(STATUS_PROGRESS[status]);
@@ -333,91 +311,14 @@ export default function HomePage() {
 
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
-  const toggleTheme = () => {
-    const nextTheme = theme === "dark" ? "light" : "dark";
-    setTheme(nextTheme);
-    document.documentElement.classList.toggle("dark", nextTheme === "dark");
-    window.localStorage.setItem("theme", nextTheme);
-  };
-
   return (
-    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
-      <Sidebar
-        collapsible="icon"
-        onMouseEnter={() => setSidebarOpen(true)}
-        onMouseLeave={() => setSidebarOpen(false)}
-      >
-        <SidebarHeader className="p-2">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton tooltip="ANPR" asChild>
-                <a href="/">
-                  <Camera />
-                  <span>ANPR</span>
-                </a>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
+    <AppShell activeRoute="/tracker">
+      <div className="mx-auto mb-4 flex w-full max-w-6xl items-center gap-3">
+        <Camera className="h-8 w-8 text-primary" />
+        <h1 className="text-3xl font-bold">Vehicle Tracking & ANPR System</h1>
+      </div>
 
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Dashboard" asChild>
-                    <a href="/">
-                      <LayoutDashboard />
-                      <span>Dashboard</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Results" asChild>
-                    <a href="/results">
-                      <History />
-                      <span>Results</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Tracker" asChild isActive>
-                    <a href="/tracker">
-                      <Camera />
-                      <span>Tracker</span>
-                    </a>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-        <SidebarRail />
-      </Sidebar>
-
-      <SidebarInset>
-        <main className="min-h-screen bg-muted/30 px-4 py-8 md:px-8">
-          <div className="mx-auto mb-4 flex w-full max-w-6xl items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Camera className="h-8 w-8 text-primary" />
-              <h1 className="text-3xl font-bold">Vehicle Tracking & ANPR System</h1>
-            </div>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={toggleTheme}
-              className="rounded-full"
-            >
-              {theme === "dark" ? (
-                <Sun className="h-5 w-5" />
-              ) : (
-                <Moon className="h-5 w-5" />
-              )}
-            </Button>
-          </div>
-
-          <div className="mx-auto w-full max-w-6xl">
+      <div className="mx-auto w-full max-w-6xl">
 
             {/* Upload Section */}
             {!showROISelector && (
@@ -586,9 +487,7 @@ export default function HomePage() {
                 </AlertDescription>
               </Alert>
             )}
-          </div>
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+      </div>
+    </AppShell>
   );
 }
