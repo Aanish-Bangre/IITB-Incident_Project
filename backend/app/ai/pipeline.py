@@ -117,9 +117,11 @@ def run_pipeline(job_id: str, video_path: str, db):
                 ocr_results = run_easyocr(ocr_ready)
                 
                 if ocr_results:
-                    best = max(ocr_results, key=lambda x: x["confidence"])
-                    raw_text = best["text"]
-                    conf = best["confidence"]
+                    combined_text = "".join(r["text"] for r in ocr_results)
+                    avg_conf = sum(r["confidence"] for r in ocr_results) / len(ocr_results)
+
+                    raw_text = combined_text
+                    conf = avg_conf
 
                     if conf >= MIN_OCR_CONF:
                         # Normalize text (safe DB value)

@@ -470,9 +470,18 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
                         ocr_results = run_easyocr(ocr_ready)
                         
                         if ocr_results:
-                            best = max(ocr_results, key=lambda x: x["confidence"])
-                            raw_text = best["text"]
-                            conf = best["confidence"]
+                            # Join all OCR lines in reading order (top-to-bottom from ocr.py sort).
+                            combined_text = "".join(r["text"] for r in ocr_results)
+                            avg_conf = sum(r["confidence"] for r in ocr_results) / len(ocr_results)
+
+                            raw_text = combined_text
+                            conf = avg_conf
+
+                            if DEBUG_OCR:
+                                print(
+                                    f"[OCR_COMBINED] Track={track_id} Frame={frame_count} "
+                                    f"| Combined='{combined_text}' AvgConf={avg_conf:.2f}"
+                                )
                             
                             if DEBUG_OCR and conf < MIN_OCR_CONF:
                                 print(f"[DEBUG] Track {track_id} Frame {frame_count}: OCR too low - '{raw_text}' (conf={conf:.2f}, need {MIN_OCR_CONF})")
