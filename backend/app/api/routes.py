@@ -74,6 +74,28 @@ def _build_rtsp_url(username: str, password: str, ip_address: str, path: str) ->
     return f"rtsp://{username}:{safe_password}@{ip_address}{normalized_path}"
 
 
+def _deduplicate_plates_by_track(plates: list[Plate]) -> list[Plate]:
+    """Keep a single best row per track_id for API responses."""
+    seen_tracks: dict[int, Plate] = {}
+    for plate in plates:
+        tid = plate.track_id
+        if tid not in seen_tracks:
+            seen_tracks[tid] = plate
+            continue
+
+        existing = seen_tracks[tid]
+        existing_has_text = existing.plate_text is not None
+        current_has_text = plate.plate_text is not None
+
+        if current_has_text and not existing_has_text:
+            seen_tracks[tid] = plate
+        elif current_has_text and existing_has_text:
+            if (plate.best_confidence or 0.0) > (existing.best_confidence or 0.0):
+                seen_tracks[tid] = plate
+
+    return list(seen_tracks.values())
+
+
 def _capture_first_frame(source: str, output_path: str) -> bool:
     if source.startswith("rtsp://"):
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
@@ -223,7 +245,8 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
     if not job:
         return {"error": "Job not found"}
 
-    plates = db.query(Plate).filter(Plate.job_id == job_id).all()
+    all_plates = db.query(Plate).filter(Plate.job_id == job_id).all()
+    plates = _deduplicate_plates_by_track(all_plates)
 
     response = {
         "job_id": job_id,
@@ -366,7 +389,8 @@ def stop_camera_job(job_id: str, db: Session = Depends(get_db)):
 
     _time.sleep(1.5)
 
-    plates = db.query(Plate).filter(Plate.job_id == job_id).all()
+    all_plates = db.query(Plate).filter(Plate.job_id == job_id).all()
+    plates = _deduplicate_plates_by_track(all_plates)
 
     return {
         "job_id": job.job_id,

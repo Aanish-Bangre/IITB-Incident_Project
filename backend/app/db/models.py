@@ -30,7 +30,7 @@ class Plate(Base):
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(String, nullable=False)
 
-    plate_text = Column(String, nullable=False)
+    plate_text = Column(String, nullable=True)
     best_confidence = Column(Float, nullable=True)
     bbox_confidence = Column(Float, nullable=True)
 

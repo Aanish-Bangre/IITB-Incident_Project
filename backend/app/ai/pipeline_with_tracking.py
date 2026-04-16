@@ -28,7 +28,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(PROCESSED_DIR, exist_ok=True)
 os.makedirs(DEBUG_DIR, exist_ok=True)
 
-MIN_OCR_CONF = 0.45  # Lowered to capture plates earlier
+MIN_OCR_CONF = 0.20  # Lowered to capture plates earlier
 DEBUG_OCR = True  # Enable OCR debugging
 
 
@@ -160,7 +160,6 @@ def _upsert_plate_record(
         .filter(
             Plate.job_id == job_id,
             Plate.track_id == track_id,
-            Plate.plate_text == plate_text,
         )
         .first()
     )
@@ -191,6 +190,50 @@ def _upsert_plate_record(
         plate_record.frame_number = frame_number
 
     db.commit()
+
+
+def _upsert_vehicle_record(
+    db,
+    job_id: str,
+    track_id: int,
+    vehicle_type,
+    vehicle_conf,
+    vehicle_crop,
+    frame_number: int,
+    detected_at=None,
+):
+    """Save a vehicle detection even if no plate was found. Plate fields default to None."""
+    vehicle_img_path = None
+    if vehicle_crop is not None:
+        vehicle_img_path = f"{OUTPUT_DIR}/{job_id}_track{track_id}_vehicle_only.jpg"
+        cv2.imwrite(vehicle_img_path, vehicle_crop)
+
+    existing = (
+        db.query(Plate)
+        .filter(
+            Plate.job_id == job_id,
+            Plate.track_id == track_id,
+        )
+        .first()
+    )
+
+    if existing is None:
+        record = Plate(
+            job_id=job_id,
+            plate_text=None,
+            best_confidence=None,
+            bbox_confidence=None,
+            best_image_path=None,
+            vehicle_type=vehicle_type,
+            vehicle_confidence=vehicle_conf,
+            vehicle_image_path=vehicle_img_path,
+            track_id=track_id,
+            frame_number=frame_number,
+            crossed_line=1,
+            detected_at=detected_at,
+        )
+        db.add(record)
+        db.commit()
 
 
 def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: queue.Queue | None = None):
@@ -277,6 +320,7 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
     
     frame_count = 0
     crossed_track_ids = set()  # Track IDs that crossed the line
+    vehicle_saved_tracks = set()  # Track IDs for which we've already saved a vehicle record
     live_frame_path = os.path.join("media", "frames", f"{job_id}_live.jpg")
     is_camera_stream = job.job_type == "camera_stream"
     consecutive_read_failures = 0
@@ -441,6 +485,28 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
             if should_process:
                 # Crop vehicle region
                 vehicle_crop = frame[vy1:vy2, vx1:vx2]
+
+                # Save vehicle record immediately on first detection.
+                display_id = _get_display_id(track_id)
+                if display_id not in vehicle_saved_tracks:
+                    vehicle_type_now = None
+                    vehicle_conf_now = None
+                    for v in vehicle_detections:
+                        if is_inside([vx1, vy1, vx2, vy2], v["bbox"]):
+                            vehicle_type_now = v["label"]
+                            vehicle_conf_now = v["confidence"]
+                            break
+                    _upsert_vehicle_record(
+                        db=db,
+                        job_id=job_id,
+                        track_id=display_id,
+                        vehicle_type=vehicle_type_now,
+                        vehicle_conf=vehicle_conf_now,
+                        vehicle_crop=vehicle_crop.copy(),
+                        frame_number=frame_count,
+                        detected_at=datetime.now(),
+                    )
+                    vehicle_saved_tracks.add(display_id)
                 
                 # Detect plates in vehicle region
                 plate_detections = detect_plates(vehicle_crop)
@@ -493,7 +559,6 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
 
                             if text:
                                 display_text = text
-                                display_id = _get_display_id(track_id)
 
                                 # Store plate info for this track
                                 if display_id not in tracked_plates:
@@ -540,11 +605,41 @@ def run_pipeline_with_tracking(job_id: str, video_path: str, db, frame_queue: qu
 
                                 if DEBUG_OCR and not is_valid_plate(text):
                                     print(f"[DEBUG] Track {track_id} Frame {frame_count}: Saved non-validated OCR '{text}' (raw: '{raw_text}', conf={conf:.2f})")
-                            elif DEBUG_OCR:
-                                print(f"[DEBUG] Track {track_id} Frame {frame_count}: OCR text empty after cleanup (raw: '{raw_text}')")
+                            else:
+                                # OCR ran but text was unusable; keep a plate crop so UI has plate evidence.
+                                if raw_crop is not None:
+                                    plate_crop_path = f"{OUTPUT_DIR}/{job_id}_track{display_id}_platecrop_f{frame_count}.jpg"
+                                    cv2.imwrite(plate_crop_path, raw_crop)
+                                    existing = (
+                                        db.query(Plate)
+                                        .filter(Plate.job_id == job_id, Plate.track_id == display_id)
+                                        .first()
+                                    )
+                                    if existing is not None and existing.best_image_path is None:
+                                        existing.best_image_path = plate_crop_path
+                                        db.commit()
+
+                                if DEBUG_OCR:
+                                    print(
+                                        f"[DEBUG] Track {track_id} Frame {frame_count}: OCR text empty after cleanup "
+                                        f"(raw: '{raw_text}') - crop saved"
+                                    )
                         else:
+                            # OCR returned nothing; keep a plate crop so UI has plate evidence.
+                            if raw_crop is not None:
+                                plate_crop_path = f"{OUTPUT_DIR}/{job_id}_track{display_id}_platecrop_f{frame_count}.jpg"
+                                cv2.imwrite(plate_crop_path, raw_crop)
+                                existing = (
+                                    db.query(Plate)
+                                    .filter(Plate.job_id == job_id, Plate.track_id == display_id)
+                                    .first()
+                                )
+                                if existing is not None and existing.best_image_path is None:
+                                    existing.best_image_path = plate_crop_path
+                                    db.commit()
+
                             if DEBUG_OCR:
-                                print(f"[DEBUG] Track {track_id} Frame {frame_count}: OCR returned no results")
+                                print(f"[DEBUG] Track {track_id} Frame {frame_count}: OCR returned no results - crop saved")
                     else:
                         if DEBUG_OCR:
                             print(f"[DEBUG] Track {track_id} Frame {frame_count}: Preprocessing failed (ocr_ready is None)")
